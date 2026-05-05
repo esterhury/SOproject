@@ -1,6 +1,9 @@
 #ifndef GRAPH_H
 #define GRAPH_H
 
+typedef struct Graph Graph;
+int dijkstra(Graph* graph, int src, int dst);
+
 /* Structure for a node in the adjacency list */
 typedef struct Node {
     int dest;

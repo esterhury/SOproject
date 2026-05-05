@@ -3,7 +3,7 @@
 
 int main() {
     int src, dst;
-    
+
     Graph* graph = loadGraphFromFile("input.txt", &src, &dst);
 
     if (graph == NULL) {
@@ -17,6 +17,6 @@ int main() {
     }
 
     freeGraph(graph);
-    
+
     return 0;
 }

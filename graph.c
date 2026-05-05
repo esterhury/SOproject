@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include "graph.h"
 
 /* Create a new graph with a given number of vertices */
@@ -23,7 +24,7 @@ void addEdge(Graph* graph, int src, int dest, int weight) {
     graph->adjLists[src] = newNode;
 }
 
-/* Load graph data and the query (src, dst) from a file[cite: 1] */
+/* Load graph data and the query (src, dst) from a file */
 Graph* loadGraphFromFile(const char* filename, int* startNode, int* endNode) {
     FILE* file = fopen(filename, "r");
     if (!file) {
@@ -42,10 +43,9 @@ Graph* loadGraphFromFile(const char* filename, int* startNode, int* endNode) {
     for (int i = 0; i < m; i++) {
         int u, v, w;
         if (fscanf(file, "%d %d %d", &u, &v, &w) == 3) {
-            /* Check for negative weights as per requirements[cite: 1] */
+            /* Check for negative weights as per requirements */
             if (w < 0) {
-                printf("Error: Invalid input. Weights cannot be negative.\n[cite: 1]");
-                /* Note: In a full cleanup, we'd free the graph here too */
+                printf("Error: Invalid input. Weights cannot be negative.\n");
                 fclose(file);
                 return NULL;
             }
@@ -53,7 +53,7 @@ Graph* loadGraphFromFile(const char* filename, int* startNode, int* endNode) {
         }
     }
 
-    /* Read the last line containing the source and destination for Dijkstra[cite: 1] */
+    /* Read the last line containing the source and destination for Dijkstra */
     if (fscanf(file, "%d %d", startNode, endNode) != 2) {
         /* Optional: handle missing query */
     }
@@ -62,7 +62,7 @@ Graph* loadGraphFromFile(const char* filename, int* startNode, int* endNode) {
     return graph;
 }
 
-/* Clean up memory to prevent leaks[cite: 1] */
+/* Clean up memory to prevent leaks */
 void freeGraph(Graph* graph) {
     if (!graph) return;
     for (int i = 0; i < graph->numVertices; i++) {
@@ -75,4 +75,80 @@ void freeGraph(Graph* graph) {
     }
     free(graph->adjLists);
     free(graph);
+}
+
+// Initializes distance and visited arrays, setting the source node's distance to 0.
+static void initDistances(int distances[], int visited[], int numVertices, int src) {
+    for (int i = 0; i < numVertices; i++) {
+        distances[i] = INT_MAX;
+        visited[i] = 0;
+    }
+    distances[src] = 0;
+}
+
+// Relaxes an edge and updates the shortest path if a better one is found.
+static void relax(int u, int v, int weight, int distances[], int visited[]) {
+    if (!visited[v] && distances[u] != INT_MAX && (distances[u] + weight < distances[v])) {
+        distances[v] = distances[u] + weight;
+    }
+}
+
+// Finds the shortest path cost from source to destination.
+int dijkstra(Graph* graph, int src, int dst) {
+    // Validate arguments to prevent memory errors
+    if (graph == NULL || src < 0 || src >= graph->numVertices || dst < 0 || dst >= graph->numVertices) {
+        return -1;
+    }
+
+    int numVertices = graph->numVertices;
+
+    // Allocate memory safely and check allocations
+    int* distances = (int*)malloc(numVertices * sizeof(int));
+    if (distances == NULL) {
+        return -1;
+    }
+    int* visited = (int*)malloc(numVertices * sizeof(int));
+    if (visited == NULL) {
+        free(distances);
+        return -1;
+    }
+
+    // Initialize data structures
+    initDistances(distances, visited, numVertices, src);
+
+    for (int i = 0; i < numVertices - 1; i++) {
+        int minDistance = INT_MAX;
+        int u = -1;
+
+        // Find the closest unvisited vertex
+        for (int v = 0; v < numVertices; v++) {
+            if (visited[v] == 0 && distances[v] <= minDistance) {
+                minDistance = distances[v];
+                u = v;
+            }
+        }
+
+        // If the remaining vertices are unreachable or we reached the destination
+        if (u == -1 || distances[u] == INT_MAX || u == dst) {
+            break;
+        }
+
+        // Mark vertex as visited
+        visited[u] = 1;
+
+        // Update shortest path estimates to neighbors
+        Node* current = graph->adjLists[u];
+        while (current) {
+            relax(u, current->dest, current->weight, distances, visited);
+            current = current->next;
+        }
+    }
+
+    int result = distances[dst];
+
+    // Free allocated memory before returning
+    free(distances);
+    free(visited);
+
+    return result;
 }
