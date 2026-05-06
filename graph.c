@@ -87,14 +87,14 @@ static void initDistances(int distances[], int visited[], int numVertices, int s
 }
 
 // Relaxes an edge and updates the shortest path if a better one is found.
-static void relax(int u, int v, int weight, int distances[], int visited[]) {
+static void relax(int u, int v, int weight, int distances[], int visited[], int parent[]) {
     if (!visited[v] && distances[u] != INT_MAX && (distances[u] + weight < distances[v])) {
         distances[v] = distances[u] + weight;
+        parent[v] = u; // שמירת ההורה לצורך שחזור מסלול
     }
 }
-
 // Finds the shortest path cost from source to destination.
-int dijkstra(Graph* graph, int src, int dst) {
+int dijkstra(Graph* graph, int src, int dst, int* parent) {
     // Validate arguments to prevent memory errors
     if (graph == NULL || src < 0 || src >= graph->numVertices || dst < 0 || dst >= graph->numVertices) {
         return -1;
@@ -112,6 +112,8 @@ int dijkstra(Graph* graph, int src, int dst) {
         free(distances);
         return -1;
     }
+    // אתחול מערך parent ב-1- (מסמן שאין הורה עדיין)
+    for (int i = 0; i < numVertices; i++) {parent[i] = -1;}
 
     // Initialize data structures
     initDistances(distances, visited, numVertices, src);
@@ -139,7 +141,7 @@ int dijkstra(Graph* graph, int src, int dst) {
         // Update shortest path estimates to neighbors
         Node* current = graph->adjLists[u];
         while (current) {
-            relax(u, current->dest, current->weight, distances, visited);
+            relax(u, current->dest, current->weight, distances, visited, parent);
             current = current->next;
         }
     }
@@ -151,4 +153,14 @@ int dijkstra(Graph* graph, int src, int dst) {
     free(visited);
 
     return result;
+}
+
+//  הוספת פונקציית הדפסת המסלול
+void printPath(int* parent, int src, int dst) {
+    if (dst == src) {
+        printf("%d", src);
+        return;
+    }
+    printPath(parent, src, parent[dst]);
+    printf(" -> %d", dst);
 }
