@@ -2,7 +2,7 @@
 #define GRAPH_H
 
 typedef struct Graph Graph;
-int dijkstra(Graph* graph, int src, int dst);
+int dijkstra(Graph* graph, int src, int dst, int parent[]);
 
 /* Structure for a node in the adjacency list */
 typedef struct Node {

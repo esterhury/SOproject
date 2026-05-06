@@ -94,33 +94,33 @@ static void relax(int u, int v, int weight, int distances[], int visited[]) {
 }
 
 // Finds the shortest path cost from source to destination.
-int dijkstra(Graph* graph, int src, int dst) {
-    // Validate arguments to prevent memory errors
+
+int dijkstra(Graph* graph, int src, int dst, int parent[]) {
     if (graph == NULL || src < 0 || src >= graph->numVertices || dst < 0 || dst >= graph->numVertices) {
         return -1;
     }
 
     int numVertices = graph->numVertices;
 
-    // Allocate memory safely and check allocations
+    // Allocate memory for distances and visited status
     int* distances = (int*)malloc(numVertices * sizeof(int));
-    if (distances == NULL) {
-        return -1;
-    }
     int* visited = (int*)malloc(numVertices * sizeof(int));
-    if (visited == NULL) {
-        free(distances);
-        return -1;
+
+    // Initialize all nodes: distance to infinity, visited to false, and no parent
+    for (int i = 0; i < numVertices; i++) {
+        distances[i] = INT_MAX;
+        visited[i] = 0;
+        parent[i] = -1; // -1 indicates the node has no predecessor yet
     }
 
-    // Initialize data structures
-    initDistances(distances, visited, numVertices, src);
+    // Distance from source to itself is always 0
+    distances[src] = 0;
 
     for (int i = 0; i < numVertices - 1; i++) {
         int minDistance = INT_MAX;
         int u = -1;
 
-        // Find the closest unvisited vertex
+        // Extract the unvisited node with the smallest known distance
         for (int v = 0; v < numVertices; v++) {
             if (visited[v] == 0 && distances[v] <= minDistance) {
                 minDistance = distances[v];
@@ -128,25 +128,31 @@ int dijkstra(Graph* graph, int src, int dst) {
             }
         }
 
-        // If the remaining vertices are unreachable or we reached the destination
+        // If no reachable nodes are left or we reached the target, stop
         if (u == -1 || distances[u] == INT_MAX || u == dst) {
             break;
         }
 
-        // Mark vertex as visited
-        visited[u] = 1;
+        visited[u] = 1; // Mark node as processed
 
-        // Update shortest path estimates to neighbors
+        // Relaxation step: check all neighbors of the current node 'u'
         Node* current = graph->adjLists[u];
         while (current) {
-            relax(u, current->dest, current->weight, distances, visited);
+            int v = current->dest;
+            int weight = current->weight;
+
+            // If a shorter path to 'v' is found via 'u', update distance and parent
+            if (!visited[v] && distances[u] != INT_MAX && (distances[u] + weight < distances[v])) {
+                distances[v] = distances[u] + weight;
+                parent[v] = u; // Store 'u' as the parent of 'v' for path tracking
+            }
             current = current->next;
         }
     }
 
     int result = distances[dst];
 
-    // Free allocated memory before returning
+    // Free local memory to avoid leaks
     free(distances);
     free(visited);
 
