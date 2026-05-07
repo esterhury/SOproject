@@ -9,6 +9,8 @@ int main() {
     int src, dst;
     Graph* graph = loadGraphFromFile("input.txt", &src, &dst);
     if (graph == NULL) return 1;
+    //Prepare the visual layout by calculating non-overlapping node coordinates for the GUI
+    computePosition(graph);
 
     // הקצאת מערך parent שישמש אותנו
     int* parent = (int*)malloc(graph->numVertices * sizeof(int));
