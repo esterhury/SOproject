@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include "raylib.h"
 #include "graph.h"
 
 // Create a new graph with a given number of vertices
@@ -12,6 +13,7 @@ Graph* createGraph(int vertices) {
     for (int i = 0; i < vertices; i++) {
         graph->adjLists[i] = NULL;
     }
+    graph->positions = (Vector2*)malloc(vertices * sizeof(Vector2));
     return graph;
 }
 
@@ -77,6 +79,7 @@ void freeGraph(Graph* graph) {
         }
     }
     free(graph->adjLists);
+    free(graph->positions);
     free(graph);
 }
 
@@ -166,4 +169,25 @@ void printPath(int* parent, int src, int dst) {
 
 // end of milestone 1
 
+
+/*Calculates unique X,Y coordinates for each node using a grid-based distribution
+to ensure the graph is readable and nodes do not overlap.*/
+void computePosition(Graph* graph) {
+    if (!graph || graph->numVertices <= 0) {
+        return;
+    }
+    int cols = 4;
+    int rows = (graph->numVertices / cols) + 1;
+    float cellWidth = 800.0f / cols;
+    float cellHeight = 600.0f / rows;
+    for (int i = 0; i < graph->numVertices; i++) {
+        int r = i / cols;
+        int c = i % cols;
+        float baseX = (c * cellWidth) + (cellWidth / 2.0f);
+        float baseY = (r * cellHeight) + (cellHeight / 2.0f);
+
+        graph->positions[i].x = baseX + GetRandomValue(-20, 20);
+        graph->positions[i].y = baseY + GetRandomValue(-20, 20);
+    }
+}
 
