@@ -1,56 +1,55 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <limits.h>
+#include "raylib.h"
 #include "graph.h"
+#include <stdio.h>
 
-
- //Recursively prints the shortest path from source to destination.
-void printPath(int parent[], int j) {
-    // Base case: If node is the source (has no predecessor)
-    if (parent[j] == -1) {
-        printf("%d", j);
-        return;
-    }
-    printPath(parent, parent[j]);
-    printf(" -> %d", j);
-}
-
-int main(int argc, char* argv[]) {
+int main() {
+    // 1. Load your graph from Milestone 1
     int src, dst;
+    Graph* graph = loadGraphFromFile("input.txt", &src, &dst);
+    if (graph == NULL) return 1;
+    //Prepare the visual layout by calculating non-overlapping node coordinates for the GUI
+    computePosition(graph);
 
-    // Use command line argument for the filename as per technical requirements
-    char* filename = (argc > 1) ? argv[1] : "input.txt";
-
-    // Load graph data and the query (src, dst) from the file
-    Graph* graph = loadGraphFromFile(filename, &src, &dst);
-
-    if (graph == NULL) {
-        return 1; // Error message is already handled inside loadGraphFromFile
-    }
-
-    // Allocate memory for the parent array to store path predecessors
+    // הקצאת מערך parent שישמש אותנו
     int* parent = (int*)malloc(graph->numVertices * sizeof(int));
-    if (parent == NULL) {
-        freeGraph(graph);
-        return 1;
-    }
 
-    // Execute Dijkstra's algorithm and get the total distance
-    int totalDistance = dijkstra(graph, src, dst, parent);
-    if (totalDistance == INT_MAX || totalDistance == -1) {
-        printf("No path found\n");
-    } else if (src == dst) {
-        // Source and destination are the same
+    if (src == dst) {
         printf("0\n");
     } else {
-        // Path found - print the route and the total weight
-        printPath(parent, dst);
-        printf("\n%d\n", totalDistance);
+        int weight = dijkstra(graph, src, dst, parent);
+
+        if (weight == -1 || parent[dst] == -1) {
+            // בודק אם אין מסלול (INT_MAX או לא ניתן להגיע)
+            printf("No path found\n");
+        } else {
+            printPath(parent, src, dst);
+            printf("\n%d\n", weight); // הדפסת המשקל בסוף
+        }
     }
 
-    // Clean up memory to prevent leaks
-    free(parent);
+    free(parent); // חשוב מאוד כדי למנוע Memory Leak
     freeGraph(graph);
+    // 2. Initialize the Window (Member 1 Task)
+    InitWindow(800, 600, "SO Project - Milestone 2");
+    SetTargetFPS(60);
+
+    // 3. The Visual Loop
+    while (!WindowShouldClose()) {
+        BeginDrawing();
+        ClearBackground(RAYWHITE);
+
+        // This shows the environment is ready for Member 2 & 3
+        DrawText("Raylib Framework: READY", 240, 250, 20, DARKGRAY);
+        DrawText("Graph Data: LOADED", 280, 290, 20, MAROON);
+
+        EndDrawing();
+    }
+
+    // 4. Cleanup
+    freeGraph(graph);
+    CloseWindow();
 
     return 0;
 }

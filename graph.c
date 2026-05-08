@@ -12,6 +12,7 @@ Graph* createGraph(int vertices) {
     for (int i = 0; i < vertices; i++) {
         graph->adjLists[i] = NULL;
     }
+    graph->positions = (Vector2*)malloc(vertices * sizeof(Vector2));
     return graph;
 }
 
@@ -74,6 +75,7 @@ void freeGraph(Graph* graph) {
         }
     }
     free(graph->adjLists);
+    free(graph->positions);
     free(graph);
 }
 
@@ -87,9 +89,10 @@ static void initDistances(int distances[], int visited[], int numVertices, int s
 }
 
 // Relaxes an edge and updates the shortest path if a better one is found.
-static void relax(int u, int v, int weight, int distances[], int visited[]) {
+static void relax(int u, int v, int weight, int distances[], int visited[], int parent[]) {
     if (!visited[v] && distances[u] != INT_MAX && (distances[u] + weight < distances[v])) {
         distances[v] = distances[u] + weight;
+        parent[v] = u; // שמירת ההורה לצורך שחזור מסלול
     }
 }
 
@@ -157,4 +160,35 @@ int dijkstra(Graph* graph, int src, int dst, int parent[]) {
     free(visited);
 
     return result;
+}
+
+//  הוספת פונקציית הדפסת המסלול
+void printPath(int* parent, int src, int dst) {
+    if (dst == src) {
+        printf("%d", src);
+        return;
+    }
+    printPath(parent, src, parent[dst]);
+    printf(" -> %d", dst);
+}
+
+/*Calculates unique X,Y coordinates for each node using a grid-based distribution
+to ensure the graph is readable and nodes do not overlap.*/
+void computePosition(Graph* graph) {
+    if (!graph || graph->numVertices <= 0) {
+        return;
+    }
+    int cols = 4;
+    int rows = (graph->numVertices / cols) + 1;
+    float cellWidth = 800.0f / cols;
+    float cellHeight = 600.0f / rows;
+    for (int i = 0; i < graph->numVertices; i++) {
+        int r = i / cols;
+        int c = i % cols;
+        float baseX = (c * cellWidth) + (cellWidth / 2.0f);
+        float baseY = (r * cellHeight) + (cellHeight / 2.0f);
+
+        graph->positions[i].x = baseX + GetRandomValue(-20, 20);
+        graph->positions[i].y = baseY + GetRandomValue(-20, 20);
+    }
 }
