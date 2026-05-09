@@ -20,10 +20,9 @@ Graph* createGraph(int vertices);
 void addEdge(Graph* graph, int src, int dest, int weight);
 Graph* loadGraphFromFile(const char* filename, int* startNode, int* endNode);
 void freeGraph(Graph* graph);
-void computePosition(Graph* graph);
-
-// Algorithm functions
 int dijkstra(Graph* graph, int src, int dst, int parent[]);
 void printPath(int* parent, int src, int dst);
+void computePosition(Graph* graph);
+void drawGraph(Graph* graph);
 
 #endif

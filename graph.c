@@ -190,4 +190,71 @@ void computePosition(Graph* graph) {
         graph->positions[i].y = baseY + GetRandomValue(-20, 20);
     }
 }
+// Visualizes the graph by drawing edges and then nodes on top
+void drawGraph(Graph* graph) {
+    if (!graph) return;
 
+    const char* cityNames[] = {"Jerusalem", "Tel Aviv", "Haifa", "Eilat", "Beersheba", "Ashdod", "Tiberias"};
+    ClearBackground((Color){ 240, 242, 245, 255 });
+
+    // Edges, Optimized Arrows, and Offset Weights
+    for (int i = 0; i < graph->numVertices; i++) {
+        Node* temp = graph->adjLists[i];
+        while (temp) {
+            Vector2 startPos = graph->positions[i];
+            Vector2 endPos = graph->positions[temp->dest];
+
+            // Draw the main road
+            DrawLineEx(startPos, endPos, 2.0f, (Color){ 160, 160, 160, 255 });
+
+            float dx = endPos.x - startPos.x;
+            float dy = endPos.y - startPos.y;
+            float length = sqrtf(dx * dx + dy * dy);
+
+            if (length > 0) {
+                Vector2 unitDir = { dx / length, dy / length };
+
+                // Arrowhead Positioned near the destination node
+                Vector2 arrowPos = { endPos.x - unitDir.x * 28, endPos.y - unitDir.y * 28 };
+                DrawPoly(arrowPos, 3, 7, atan2f(dy, dx) * RAD2DEG, (Color){ 52, 73, 94, 255 });
+                Vector2 weightPos = {
+                    startPos.x + unitDir.x * (length * 0.33f),
+                    startPos.y + unitDir.y * (length * 0.33f)
+                };
+
+                char weightStr[12];
+                sprintf(weightStr, "%d km", temp->weight);
+                int fontSize = 14;
+                int textWidth = MeasureText(weightStr, fontSize);
+
+                // Drawing a clean label for the distance
+                DrawRectangle(weightPos.x - (textWidth/2 + 3), weightPos.y - 9, textWidth + 6, 18, (Color){ 231, 76, 60, 255 });
+                DrawText(weightStr, weightPos.x - textWidth/2, weightPos.y - 7, fontSize, WHITE);
+            }
+            temp = temp->next;
+        }
+    }
+
+    // Nodes and City Labels
+    for (int i = 0; i < graph->numVertices; i++) {
+        Vector2 pos = graph->positions[i];
+        float radius = 22.0f;
+
+        DrawCircleV(pos, radius, (Color){ 44, 62, 80, 255 });
+        DrawCircleLinesV(pos, radius, (Color){ 52, 152, 219, 255 });
+
+        char idStr[5];
+        sprintf(idStr, "%d", i);
+        int idWidth = MeasureText(idStr, 18);
+        DrawText(idStr, pos.x - idWidth / 2, pos.y - 9, 18, WHITE);
+
+        if (i < 7) {
+            int cityFontSize = 16;
+            int cityNameWidth = MeasureText(cityNames[i], cityFontSize);
+            float yOffset = (pos.y < 300) ? -45 : 30;
+
+            DrawText(cityNames[i], pos.x - (cityNameWidth / 2), pos.y + yOffset, cityFontSize, (Color){ 44, 62, 80, 255 });
+        }
+    }
+}
+// end of milestone 2

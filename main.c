@@ -2,11 +2,12 @@
 #include <stdlib.h>
 #include "raylib.h"
 #include "graph.h"
+#include <math.h>
 
 int main() {
     int src, dst;
 
-    Graph* graph = loadGraphFromFile("input.txt", &src, &dst);
+    Graph* graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &src, &dst);
     if (graph == NULL) return 1;
 
     computePosition(graph);
@@ -24,9 +25,13 @@ int main() {
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        // continue the graph!
-        DrawText("Raylib Framework: READY", 240, 250, 20, DARKGRAY);
-        DrawText("Graph Data: LOADED", 280, 290, 20, MAROON);
+        // Call the visualization function
+        drawGraph(graph);
+
+        // Display current query info
+        if (src != -1 && dst != -1) {
+            DrawText(TextFormat("Query: %d to %d", src, dst), 15, 15, 20, DARKBLUE);
+        }
 
         EndDrawing();
     }
