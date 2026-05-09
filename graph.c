@@ -5,7 +5,7 @@
 #include "graph.h"
 
 // Create a new graph with a given number of vertices
-Graph* createGraph(int vertices) {
+Graph* createGraph(int vertices){
     Graph* graph = (Graph*)malloc(sizeof(Graph));
     graph->numVertices = vertices;
     graph->adjLists = (Node**)malloc(vertices * sizeof(Node*));
@@ -190,8 +190,9 @@ void computePosition(Graph* graph) {
         graph->positions[i].y = baseY + GetRandomValue(-20, 20);
     }
 }
-// Visualizes the graph by drawing edges and then nodes on top
-void drawGraph(Graph* graph) {
+
+// Visualizes the graph and highlights the shortest path if active
+void drawGraph(Graph* graph, Path path) { // MILESTONE 3 UPDATE
     if (!graph) return;
 
     const char* cityNames[] = {"Jerusalem", "Tel Aviv", "Haifa", "Eilat", "Beersheba", "Ashdod", "Tiberias"};
@@ -204,8 +205,23 @@ void drawGraph(Graph* graph) {
             Vector2 startPos = graph->positions[i];
             Vector2 endPos = graph->positions[temp->dest];
 
+            //  MILESTONE 3 UPDATE- Path Highlighting Logic
+            Color edgeColor = (Color){ 160, 160, 160, 255 };
+            float thickness = 2.0f;
+
+            if (path.active) {
+                for (int k = 0; k < path.count - 1; k++) {
+                    if (path.nodes[k] == i && path.nodes[k+1] == temp->dest) {
+                        edgeColor = YELLOW;
+                        thickness = 4.5f;
+                        break;
+                    }
+                }
+            }
+            //END OF MILESTONE 3 UPDATE
+
             // Draw the main road
-            DrawLineEx(startPos, endPos, 2.0f, (Color){ 160, 160, 160, 255 });
+            DrawLineEx(startPos, endPos, thickness, edgeColor);
 
             float dx = endPos.x - startPos.x;
             float dy = endPos.y - startPos.y;
@@ -216,7 +232,7 @@ void drawGraph(Graph* graph) {
 
                 // Arrowhead Positioned near the destination node
                 Vector2 arrowPos = { endPos.x - unitDir.x * 28, endPos.y - unitDir.y * 28 };
-                DrawPoly(arrowPos, 3, 7, atan2f(dy, dx) * RAD2DEG, (Color){ 52, 73, 94, 255 });
+                DrawPoly(arrowPos, 3, 7, atan2f(dy, dx) * RAD2DEG, edgeColor);
                 Vector2 weightPos = {
                     startPos.x + unitDir.x * (length * 0.33f),
                     startPos.y + unitDir.y * (length * 0.33f)
@@ -258,3 +274,40 @@ void drawGraph(Graph* graph) {
     }
 }
 // end of milestone 2
+
+
+/**
+ * Reconstructs the shortest path from the source to the destination
+ * using the parent array populated by Dijkstra's algorithm.
+ */
+Path reconstructPath(int* parent, int src, int dst) {
+    Path p;
+    p.count = 0;
+    p.active = false;
+
+    // Validate that a path exists and the destination is reachable
+    if (dst == -1 || (parent[dst] == -1 && src != dst)) {
+        return p;
+    }
+
+    int current = dst;
+    int tempPath[100];
+    int tempCount = 0;
+
+    // Traverse backwards from destination to source using parent pointers
+    while (current != -1) {
+        tempPath[tempCount++] = current;
+        if (current == src) break;
+        current = parent[current];
+    }
+
+    // Reverse the sequence to store the path in correct order (Source -> Destination)
+    for (int i = 0; i < tempCount; i++) {
+        p.nodes[i] = tempPath[tempCount - 1 - i];
+    }
+
+    p.count = tempCount;
+    p.active = true;
+
+    return p;
+}
