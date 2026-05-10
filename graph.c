@@ -3,6 +3,7 @@
 #include <limits.h>
 #include "raylib.h"
 #include "graph.h"
+#include <stdbool.h>
 
 // Create a new graph with a given number of vertices
 Graph* createGraph(int vertices){
@@ -310,4 +311,62 @@ Path reconstructPath(int* parent, int src, int dst) {
     p.active = true;
 
     return p;
+}
+
+/* Handles entity animation timing, including node delays and edge traversal steps */
+void updateEntity(Entity* entity, Graph* graph, Path* path) {
+    // Check if animation is active and destination has not been reached
+    if (!entity->isMoving || !path->active || entity->currentPathIndex >= path->count - 1) {
+        return;
+    }
+
+    // Identify current and next nodes to determine the edge being traversed
+    int u = path->nodes[entity->currentPathIndex];
+    int v = path->nodes[entity->currentPathIndex + 1];
+
+    // Find the weight (W) of the current edge from the adjacency list
+    int weight = 1;
+    Node* temp = graph->adjLists[u];
+    while (temp) {
+        if (temp->dest == v) {
+            weight = temp->weight;
+            break;
+        }
+        temp = temp->next;
+    }
+
+    // Logic for 1-second wait time at each intermediate node
+    if (entity->isWaiting) {
+        entity->frameCounter++;
+        if (entity->frameCounter >= NODE_WAIT_TIME) {
+            entity->isWaiting = false;
+            entity->frameCounter = 0;
+            entity->currentStep = 0;
+        }
+        return;
+    }
+    // Logic for dividing the edge into W jumps, each lasting 300ms
+    entity->frameCounter++;
+    if (entity->frameCounter >= EDGE_STEP_TIME) {
+        entity->currentStep++;
+        entity->frameCounter = 0;
+
+        // Calculate new position using linear interpolation (LERP) based on weight jumps
+        float t = (float)entity->currentStep / weight;
+        entity->currentPos.x = graph->positions[u].x + t * (graph->positions[v].x - graph->positions[u].x);
+        entity->currentPos.y = graph->positions[u].y + t * (graph->positions[v].y - graph->positions[u].y);
+
+        // Check if current edge traversal is finished
+        if (entity->currentStep >= weight) {
+            entity->currentPathIndex++;
+
+            // Set waiting flag for next node or stop if destination reached
+            if (entity->currentPathIndex < path->count - 1) {
+                entity->isWaiting = true;
+            } else {
+                entity->isMoving = false;
+                printf("Reached destination!\n");
+            }
+        }
+    }
 }
