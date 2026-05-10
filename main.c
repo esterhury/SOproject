@@ -20,14 +20,15 @@ void DrawCar(Vector2 position, float rotation, Color color) {
 
 int main() {
     int src, dst;
-    // Load graph and query
-    Graph* graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &src, &dst);
+    // Load graph and query from file
+    Graph* graph = loadGraphFromFile("input.txt", &src, &dst);
     if (graph == NULL) return 1;
 
     computePosition(graph);
     int* parent = (int*)malloc(graph->numVertices * sizeof(int));
     Path shortestPath = { .active = false, .count = 0 };
 
+    // Calculate shortest path if nodes are valid
     if (src != -1 && dst != -1) {
         dijkstra(graph, src, dst, parent);
         shortestPath = reconstructPath(parent, src, dst);
@@ -40,12 +41,12 @@ int main() {
     Rectangle playBtn = { 650, 20, 120, 40 };
     Rectangle stopBtn = { 650, 70, 120, 40 };
 
-    // Initialize the Entity according to your struct
+    // Initialize the Entity according to the struct
     Entity movingEntity = { 0 };
     if (shortestPath.active && shortestPath.count > 0) {
         movingEntity.currentPos = graph->positions[shortestPath.nodes[0]];
         movingEntity.currentPathIndex = 0;
-        movingEntity.isMoving = false; // Starts stationary
+        movingEntity.isMoving = false;
         movingEntity.isWaiting = true; // Wait at the first node
     }
 
@@ -55,28 +56,41 @@ int main() {
     while (!WindowShouldClose()) {
         // --- Input Handling ---
         Vector2 mousePoint = GetMousePosition();
+
+        // Handle Play/Replay button
         if (CheckCollisionPointRec(mousePoint, playBtn) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            // Reset simulation if it has already finished
+            if (simulationFinished) {
+                movingEntity.currentPathIndex = 0;
+                movingEntity.currentStep = 0;
+                movingEntity.frameCounter = 0;
+                movingEntity.isWaiting = true;
+                movingEntity.currentPos = graph->positions[shortestPath.nodes[0]];
+                simulationFinished = false;
+            }
             movingEntity.isMoving = true;
             isRunning = true;
         }
+
+        // Handle Stop button
         if (CheckCollisionPointRec(mousePoint, stopBtn) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             movingEntity.isMoving = false;
             isRunning = false;
         }
 
-        // --- Logic Update: Tick-based movement and Wait times ---
+        // --- Logic Update ---
         if (isRunning && !simulationFinished) {
-            // Calculate rotation for the current edge
+            // Calculate rotation based on the current direction of movement
             if (movingEntity.currentPathIndex < shortestPath.count - 1) {
                 Vector2 current = graph->positions[shortestPath.nodes[movingEntity.currentPathIndex]];
                 Vector2 next = graph->positions[shortestPath.nodes[movingEntity.currentPathIndex + 1]];
                 carRotation = atan2f(next.y - current.y, next.x - current.x) * (180.0f / PI);
             }
 
-            // Use your updateEntity function logic
+            // Update entity movement using the time-based or frame-based logic
             updateEntity(&movingEntity, graph, &shortestPath);
 
-            // Check if reached destination
+            // Mark simulation as finished when destination is reached
             if (!movingEntity.isMoving && movingEntity.currentPathIndex >= shortestPath.count - 1) {
                 simulationFinished = true;
                 isRunning = false;
@@ -86,20 +100,25 @@ int main() {
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
+        // Draw graph nodes and edges
         drawGraph(graph, shortestPath);
 
-        // --- Visual Representation ---
+        // Draw the vehicle if path is active
         if (shortestPath.active) {
             DrawCar(movingEntity.currentPos, carRotation, MAROON);
         }
 
-        // GUI Buttons
+        // GUI Buttons Rendering
         DrawRectangleRec(playBtn, isRunning ? LIME : GREEN);
-        DrawText("PLAY", playBtn.x + 35, playBtn.y + 10, 20, BLACK);
+        DrawRectangleLinesEx(playBtn, 2, DARKGREEN);
+        const char* playText = simulationFinished ? "REPLAY" : "PLAY";
+        DrawText(playText, playBtn.x + (simulationFinished ? 20 : 35), playBtn.y + 10, 20, BLACK);
+
         DrawRectangleRec(stopBtn, RED);
+        DrawRectangleLinesEx(stopBtn, 2, MAROON);
         DrawText("STOP", stopBtn.x + 35, stopBtn.y + 10, 20, WHITE);
 
-        // Finish Message
+        // Display completion message
         if (simulationFinished) {
             DrawRectangle(200, 250, 400, 100, Fade(GOLD, 0.9f));
             DrawText("SIMULATION FINISHED!", 225, 285, 25, BLACK);
@@ -108,6 +127,7 @@ int main() {
         EndDrawing();
     }
 
+    // Cleanup
     free(parent);
     freeGraph(graph);
     CloseWindow();

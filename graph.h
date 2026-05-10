@@ -46,5 +46,7 @@ void printPath(int* parent, int src, int dst);
 void computePosition(Graph* graph);
 void drawGraph(Graph* graph, Path path);
 Path reconstructPath(int* parent, int src, int dst);
+void updateEntity(Entity* entity, Graph* graph, Path* path);
+void drawEntity(Entity* entity);
 
 #endif

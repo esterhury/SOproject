@@ -1,25 +1,34 @@
-# Directed Graph Traffic Simulation
+# Directed Graph Traffic Simulation Project
 
-## Group Members & Responsibilities
-*   **Ester Hury**: Sub-task 1 - Building the Graph data structures and file parsing logic.
-*   **Shira Cadury**: Sub-task 2 - Implementing the Dijkstra algorithm for shortest path calculation.
-*   **Michal Levin**: Sub-task 3 - Error handling, terminal output formatting, and specific cases (e.g., "No path found").
-*   **Elia Levi**: Sub-task 4 - Creating the Makefile, writing the README documentation, and final code testing.
+## Compilation and Execution
+To build and run the project for each milestone, use the following commands:
 
-## Project Description
-This project is a semester-long simulation of a directed graph traffic system.
-Multiple "passengers" (processes) move simultaneously across a graph using 
-operating system mechanisms such as processes, IPC, synchronization, and scheduling.
+- **Milestone 1:** - Compile: `make milestone1`
+   - Run: `./dijkstra`
+- **Milestone 2:** - Compile: `make milestone2`
+   - Run: `./sim`
+- **Milestone 3:** - Compile: `make milestone3`
+   - Run: `./sim`
 
-## Background Story: City Transit Network
-Our graph represents a simplified map of a city's public transport system.
-Nodes represent major stations (bus/train), and directed edges represent 
-one-way routes between them, with weights indicating the travel time or distance.
+## Implementation Overview
 
-## How to Run (Milestone 1)
-1. Ensure you have the source files: `main.c`, `graph.c`, `graph.h`, and `Makefile`.[cite: 1]
-2. Ensure `input.txt` is in the same directory.[cite: 1]
-3. Open terminal and run:
-   ```bash
-   make milestone1
-   ./graph_app
+### Milestone 1: Graph & Dijkstra
+- Implementation of a directed graph using adjacency lists.
+- Calculation of the shortest path using **Dijkstra's Algorithm**.
+- Input is read from `input.txt`, defining nodes, edges, and the target query.
+
+### Milestone 2: GUI Visualization
+- Integration with the **Raylib** library for graphical rendering.
+- Cities (nodes) are positioned on a grid with randomized offsets.
+- Directed edges are drawn with arrows and weight labels (km).
+
+### Milestone 3: Animation & Simulation
+- **Edge Traversal:** An edge with weight $W$ is divided into $W$ jumps.
+- **Timing:** Each jump takes exactly **300ms**, as required.
+- **Node Interaction:** The vehicle stops for **1 second** at each intermediate city.
+- **Path Reconstruction:** The shortest path is highlighted in Yellow.
+- **UI Control:** Added Play/Stop/Replay buttons and a simulation finished message.
+
+## Cleanup
+To remove all compiled binaries and object files, run:
+`make clean`

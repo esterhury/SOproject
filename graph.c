@@ -4,6 +4,7 @@
 #include "raylib.h"
 #include "graph.h"
 #include <stdbool.h>
+#include <math.h>
 
 // Create a new graph with a given number of vertices
 Graph* createGraph(int vertices){
@@ -85,21 +86,21 @@ void freeGraph(Graph* graph) {
 }
 
 // Initializes distance and visited arrays, setting the source node's distance to 0.
-static void initDistances(int distances[], int visited[], int numVertices, int src) {
+/*static void initDistances(int distances[], int visited[], int numVertices, int src) {
     for (int i = 0; i < numVertices; i++) {
         distances[i] = INT_MAX;
         visited[i] = 0;
     }
     distances[src] = 0;
-}
+}*/
 
 // Relaxes an edge and updates the shortest path if a better one is found.
-static void relax(int u, int v, int weight, int distances[], int visited[], int parent[]) {
+/*static void relax(int u, int v, int weight, int distances[], int visited[], int parent[]) {
     if (!visited[v] && distances[u] != INT_MAX && (distances[u] + weight < distances[v])) {
         distances[v] = distances[u] + weight;
         parent[v] = u;
     }
-}
+}*/
 
 // Finds the shortest path cost from source to destination.
 int dijkstra(Graph* graph, int src, int dst, int parent[]) {
@@ -219,8 +220,6 @@ void drawGraph(Graph* graph, Path path) { // MILESTONE 3 UPDATE
                     }
                 }
             }
-            //END OF MILESTONE 3 UPDATE
-
             // Draw the main road
             DrawLineEx(startPos, endPos, thickness, edgeColor);
 
@@ -260,7 +259,7 @@ void drawGraph(Graph* graph, Path path) { // MILESTONE 3 UPDATE
         DrawCircleV(pos, radius, (Color){ 44, 62, 80, 255 });
         DrawCircleLinesV(pos, radius, (Color){ 52, 152, 219, 255 });
 
-        char idStr[5];
+        char idStr[16];
         sprintf(idStr, "%d", i);
         int idWidth = MeasureText(idStr, 18);
         DrawText(idStr, pos.x - idWidth / 2, pos.y - 9, 18, WHITE);
@@ -313,18 +312,23 @@ Path reconstructPath(int* parent, int src, int dst) {
     return p;
 }
 
-/* Handles entity animation timing, including node delays and edge traversal steps */
+/**
+ * Updates the entity's position and state based on real-time elapsed.
+ * Manages node wait times and edge traversal using linear interpolation.
+ */
+/**
+ * Updates the entity's position and state using the frame counter.
+ * Traversal steps are synced to 300ms and node stops to 1 second.
+ */
 void updateEntity(Entity* entity, Graph* graph, Path* path) {
-    // Check if animation is active and destination has not been reached
     if (!entity->isMoving || !path->active || entity->currentPathIndex >= path->count - 1) {
         return;
     }
 
-    // Identify current and next nodes to determine the edge being traversed
     int u = path->nodes[entity->currentPathIndex];
     int v = path->nodes[entity->currentPathIndex + 1];
 
-    // Find the weight (W) of the current edge from the adjacency list
+    // Find weight W
     int weight = 1;
     Node* temp = graph->adjLists[u];
     while (temp) {
@@ -335,38 +339,52 @@ void updateEntity(Entity* entity, Graph* graph, Path* path) {
         temp = temp->next;
     }
 
-    // Logic for 1-second wait time at each intermediate node
+    // Requirement: 1 second wait at each intermediate node
     if (entity->isWaiting) {
         entity->frameCounter++;
-        if (entity->frameCounter >= NODE_WAIT_TIME) {
+        if (entity->frameCounter >= 60) { // 60 frames = 1 second
             entity->isWaiting = false;
             entity->frameCounter = 0;
             entity->currentStep = 0;
         }
         return;
     }
-    // Logic for dividing the edge into W jumps, each lasting 300ms
+
     entity->frameCounter++;
-    if (entity->frameCounter >= EDGE_STEP_TIME) {
-        entity->currentStep++;
+
+    // Requirement: Each jump takes exactly 300ms (18 frames)
+    if (entity->frameCounter >= 18) {
+        entity->currentStep++; // This is the "jump"
         entity->frameCounter = 0;
 
-        // Calculate new position using linear interpolation (LERP) based on weight jumps
+        // Progress 't' is current jump out of total jumps (W)
         float t = (float)entity->currentStep / weight;
+
+        if (t > 1.0f) t = 1.0f;
+
+        // Update position based on the jump
         entity->currentPos.x = graph->positions[u].x + t * (graph->positions[v].x - graph->positions[u].x);
         entity->currentPos.y = graph->positions[u].y + t * (graph->positions[v].y - graph->positions[u].y);
 
-        // Check if current edge traversal is finished
+        // Edge is finished only after W jumps
         if (entity->currentStep >= weight) {
             entity->currentPathIndex++;
 
-            // Set waiting flag for next node or stop if destination reached
             if (entity->currentPathIndex < path->count - 1) {
                 entity->isWaiting = true;
             } else {
                 entity->isMoving = false;
-                printf("Reached destination!\n");
             }
         }
     }
+}
+void drawEntity(Entity* entity) {
+    if (!entity->isMoving && entity->currentPathIndex == 0) return; // Don't draw if not started
+
+
+    DrawCircleV(entity->currentPos, 12, RED);
+    DrawCircleLinesV(entity->currentPos, 12, MAROON);
+
+
+    DrawText("BUS", entity->currentPos.x - 15, entity->currentPos.y - 25, 12, DARKGRAY);
 }
