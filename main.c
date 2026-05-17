@@ -3,6 +3,31 @@
 #include "raylib.h"
 #include "graph.h"
 #include <math.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+// Function to handle child process spawning and lifetime management
+void createTravelerProcesses(int numTravelers, pid_t* pids) {
+    for (int i = 0; i < numTravelers; i++) {
+        pids[i] = fork(); // Spawn a dedicated child process for each traveler via fork()
+        if (pids[i] < 0) {
+            perror("Error: Fork failed");
+            exit(1);
+        }
+
+        if (pids[i] == 0) {
+            // Child process execution path
+            printf("[%d] started\n", getpid()); // Print starting message with unique PID immediately
+
+            // Children sleep and remain stationary during Milestone 4
+            while (1) {
+                sleep(1);
+            }
+            exit(0);
+        }
+    }
+}
 
 // Function to draw a car with rotation (Member 3 Visuals)
 void DrawCar(Vector2 position, float rotation, Color color) {
@@ -19,14 +44,36 @@ void DrawCar(Vector2 position, float rotation, Color color) {
 }
 
 int main() {
-    int src, dst;
-    // Load graph and query from file
-    Graph* graph = loadGraphFromFile("input.txt", &src, &dst);
+    // Pointer arrays and counter to hold dynamic traveler details from file
+    int* sourcesArray = NULL;
+    int* destsArray = NULL;
+    int numTravelers = 0;
+
+    // Load graph structure and dynamic travelers arrays from input file
+    Graph* graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &sourcesArray, &destsArray, &numTravelers);
     if (graph == NULL) return 1;
 
     computePosition(graph);
     int* parent = (int*)malloc(graph->numVertices * sizeof(int));
     Path shortestPath = { .active = false, .count = 0 };
+
+    // Temporary backup to keep existing single-car logic active without breaking dijkstra
+    int src = (numTravelers > 0) ? sourcesArray[0] : -1;
+    int dst = (numTravelers > 0) ? destsArray[0] : -1;
+
+    // Allocate dynamic memory on the Heap to store child process IDs
+    pid_t* pids = (pid_t*)malloc(sizeof(pid_t) * numTravelers);
+    if (pids == NULL) {
+        printf("Error: Memory allocation failed for PIDs.\n");
+        freeGraph(graph);
+        free(sourcesArray);
+        free(destsArray);
+        free(parent);
+        return 1;
+    }
+
+    // Call helper function to fork traveler processes and print their PIDs
+    createTravelerProcesses(numTravelers, pids);
 
     // Calculate shortest path if nodes are valid
     if (src != -1 && dst != -1) {
@@ -34,7 +81,6 @@ int main() {
         shortestPath = reconstructPath(parent, src, dst);
     }
 
-    // --- Milestone 3: Control Variables ---
     bool isRunning = false;
     bool simulationFinished = false;
     float carRotation = 0.0f;
@@ -131,5 +177,15 @@ int main() {
     free(parent);
     freeGraph(graph);
     CloseWindow();
+
+    // Loop through all child PIDs and reap them to prevent zombie processes
+    for (int i = 0; i < numTravelers; i++) {
+        waitpid(pids[i], NULL, 0); // Wait for each child process to finish completely
+    }
+
+    // Free all dynamically allocated travelers buffers to avoid leaks
+    free(sourcesArray);
+    free(destsArray);
+    free(pids);
     return 0;
 }
