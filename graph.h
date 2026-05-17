@@ -39,7 +39,7 @@ typedef struct {
 
 Graph* createGraph(int vertices);
 void addEdge(Graph* graph, int src, int dest, int weight);
-Graph* loadGraphFromFile(const char* filename, int* startNode, int* endNode);
+Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int* numTravelers);
 void freeGraph(Graph* graph);
 int dijkstra(Graph* graph, int src, int dst, int parent[]);
 void printPath(int* parent, int src, int dst);
