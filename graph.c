@@ -4,6 +4,7 @@
 #include "raylib.h"
 #include "graph.h"
 #include <stdbool.h>
+#include <math.h>
 
 // Create a new graph with a given number of vertices
 Graph* createGraph(int vertices){
@@ -367,6 +368,80 @@ void updateEntity(Entity* entity, Graph* graph, Path* path) {
                 entity->isMoving = false;
                 printf("Reached destination!\n");
             }
+        }
+    }
+}
+
+// Calculate the route for a single passenger dynamically
+void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst) {
+    if (src == -1 || dst == -1) return;
+
+    // Allocate temporary parent array for Dijkstra
+    int* parent = (int*)malloc(graph->numVertices * sizeof(int));
+
+    // Run your existing Dijkstra algorithm
+    dijkstra(graph, src, dst, parent);
+
+    // Reconstruct and store the path inside the passenger structure
+    passenger->shortestPath = reconstructPath(parent, src, dst);
+
+    // Initialize the entity animation variables for this passenger
+    passenger->simulationFinished = false;
+    passenger->carRotation = 0.0f;
+
+    if (passenger->shortestPath.active && passenger->shortestPath.count > 0) {
+        passenger->movingEntity.currentPos = graph->positions[passenger->shortestPath.nodes[0]];
+        passenger->movingEntity.currentPathIndex = 0;
+        passenger->movingEntity.isMoving = true; // Activate movement state
+    }
+
+    free(parent); // Clean up temporary memory
+}
+
+// Multi-agent tracking - update all active passengers simultaneously
+void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool isRunning) {
+    if (!isRunning) return;
+
+    for (int i = 0; i < count; i++) {
+        Passenger* p = &passengers[i];
+
+        // If the passenger already finished their path, skip them
+        if (p->simulationFinished || !p->shortestPath.active) continue;
+
+        // Check if there are still road segments left to traverse
+        if (p->movingEntity.currentPathIndex < p->shortestPath.count - 1) {
+            int currNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
+            int nextNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex + 1];
+
+            // Get edge weight to adjust speed dynamically
+            float weight = 1.0f;
+            Node* temp = graph->adjLists[currNode];
+            while (temp) {
+                if (temp->dest == nextNode) { weight = (float)temp->weight; break; }
+                temp = temp->next;
+            }
+
+            float baseSpeed = 5.0f;
+            float dynamicSpeed = baseSpeed / weight;
+
+            Vector2 targetPos = graph->positions[nextNode];
+            float dx = targetPos.x - p->movingEntity.currentPos.x;
+            float dy = targetPos.y - p->movingEntity.currentPos.y;
+            float distance = sqrtf(dx * dx + dy * dy);
+
+            // Update rotation dynamically toward the next checkpoint
+            p->carRotation = atan2f(dy, dx) * (180.0f / PI);
+
+            if (distance > dynamicSpeed) {
+                p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
+                p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
+            } else {
+                p->movingEntity.currentPos = targetPos;
+                p->movingEntity.currentPathIndex++;
+            }
+        } else {
+            // Destination reached for this passenger
+            p->simulationFinished = true;
         }
     }
 }

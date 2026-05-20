@@ -3,8 +3,9 @@
 #include "raylib.h"
 #include "graph.h"
 #include <math.h>
+#include "raymath.h"
 
-// Function to draw a car that rotates towards its target (Member 3 Visuals)
+// Function to draw a car that rotates towards its target position
 void DrawCar(Vector2 position, float rotation, Color color) {
     float width = 40.0f;
     float height = 20.0f;
@@ -19,7 +20,7 @@ void DrawCar(Vector2 position, float rotation, Color color) {
     Vector2 windowOrigin = { -width / 4, (height - 6) / 2 };
     DrawRectanglePro(window, windowOrigin, rotation, SKYBLUE);
 
-    // Small wheels
+    // Small wheels configuration
     DrawCircleV(Vector2Add(position, Vector2Rotate((Vector2){-15, -10}, rotation * DEG2RAD)), 4, BLACK);
     DrawCircleV(Vector2Add(position, Vector2Rotate((Vector2){15, -10}, rotation * DEG2RAD)), 4, BLACK);
     DrawCircleV(Vector2Add(position, Vector2Rotate((Vector2){-15, 10}, rotation * DEG2RAD)), 4, BLACK);
@@ -28,115 +29,103 @@ void DrawCar(Vector2 position, float rotation, Color color) {
 
 int main() {
     int src, dst;
-    // Load graph and query - ensure the path to input.txt is correct
+    // Load graph structural data and the initial pathfinding query from the configuration file
     Graph* graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &src, &dst);
     if (graph == NULL) return 1;
 
+    // Distribute node positions visually across the screen coordinates
     computePosition(graph);
-    int* parent = (int*)malloc(graph->numVertices * sizeof(int));
-    Path shortestPath = { .active = false, .count = 0 };
 
-    if (src != -1 && dst != -1) {
-        dijkstra(graph, src, dst, parent);
-        shortestPath = reconstructPath(parent, src, dst);
-    }
+    // Array to manage and track multiple concurrent passengers within the father process
+    Passenger passengers[MAX_PASSENGERS];
+    int total_passengers = 3; // Set active simulation agent count
 
-    // --- Member 3: Animation and UI Variables ---
+    // Calculate shortest paths using Dijkstra's algorithm for each concurrent agent
+    // First passenger directly processes the source and destination read from the input file
+    passengers[0].id = 1001;
+    calculatePassengerRoute(graph, &passengers[0], src, dst);
+
+    // Second passenger initialization with a distinct source and destination segment
+    passengers[1].id = 1002;
+    calculatePassengerRoute(graph, &passengers[1], 0, 4);
+
+    // Third passenger initialization for parallel movement tracking
+    passengers[2].id = 1003;
+    calculatePassengerRoute(graph, &passengers[2], 2, 6);
+
+    // Animation control and UI state tracking variables
     bool isRunning = false;
-    bool simulationFinished = false;
-    float carRotation = 0.0f;
-
-    Entity movingEntity = { 0 };
-    if (shortestPath.active && shortestPath.count > 0) {
-        movingEntity.currentPos = graph->positions[shortestPath.nodes[0]];
-        movingEntity.currentPathIndex = 0;
-    }
-
     Rectangle playBtn = { 650, 20, 120, 40 };
     Rectangle stopBtn = { 650, 70, 120, 40 };
 
-    InitWindow(800, 600, "SO Project - Car Simulation Milestone 3");
+    // Initialize Raylib layout window configurations
+    InitWindow(800, 600, "Multi-Agent Graph Simulation");
     SetTargetFPS(60);
 
+    // Main real-time execution loop
     while (!WindowShouldClose()) {
-        // --- Member 3: UI Interaction ---
+        // UI Navigation and Button Interaction logic
         Vector2 mousePoint = GetMousePosition();
         if (CheckCollisionPointRec(mousePoint, playBtn) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             isRunning = true;
-            if (simulationFinished) { // Reset if already finished
-                movingEntity.currentPos = graph->positions[shortestPath.nodes[0]];
-                movingEntity.currentPathIndex = 0;
-                simulationFinished = false;
+
+            // Automatically reset and recalculate routing states if simulation was completed
+            for (int i = 0; i < total_passengers; i++) {
+                if (passengers[i].simulationFinished) {
+                    calculatePassengerRoute(graph, &passengers[i],
+                                            i == 0 ? src : i == 1 ? 0 : 2,
+                                            i == 0 ? dst : i == 1 ? 4 : 6);
+                }
             }
         }
         if (CheckCollisionPointRec(mousePoint, stopBtn) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             isRunning = false;
         }
 
-        // --- Member 3: Car Movement & Rotation Logic ---
-        if (isRunning && shortestPath.active && !simulationFinished) {
-            if (movingEntity.currentPathIndex < shortestPath.count - 1) {
-                int currNode = shortestPath.nodes[movingEntity.currentPathIndex];
-                int nextNode = shortestPath.nodes[movingEntity.currentPathIndex + 1];
+        // Advance positions simultaneously for all active tracking agents based on runtime state
+        updateAllPassengers(graph, passengers, total_passengers, isRunning);
 
-                // Get Weight from adjacency list to adjust speed
-                float weight = 1.0f;
-                Node* temp = graph->adjLists[currNode];
-                while (temp) {
-                    if (temp->dest == nextNode) { weight = (float)temp->weight; break; }
-                    temp = temp->next;
-                }
-
-                // Speed is inversely proportional to weight
-                float baseSpeed = 5.0f;
-                float dynamicSpeed = baseSpeed / weight;
-
-                Vector2 targetPos = graph->positions[nextNode];
-                float dx = targetPos.x - movingEntity.currentPos.x;
-                float dy = targetPos.y - movingEntity.currentPos.y;
-                float distance = sqrtf(dx*dx + dy*dy);
-
-                // Calculate rotation angle in degrees
-                carRotation = atan2f(dy, dx) * (180.0f / PI);
-
-                if (distance > dynamicSpeed) {
-                    movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
-                    movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
-                } else {
-                    // Snap to node and move to next segment
-                    movingEntity.currentPos = targetPos;
-                    movingEntity.currentPathIndex++;
-                }
-            } else {
-                simulationFinished = true;
-                isRunning = false;
-            }
-        }
-
+        // Graphics Rendering Stage
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        // Base graph rendering (Members 1 & 2)
-        drawGraph(graph, shortestPath);
+        // Render base graph network paths on screen
+        drawGraph(graph, passengers[0].shortestPath);
 
-        // --- Member 3: Car and UI Rendering ---
-        if (shortestPath.active) {
-            DrawCar(movingEntity.currentPos, carRotation, MAROON);
+        // Iterate through tracking array to render each active entity dynamically
+        bool allFinished = true;
+        for (int i = 0; i < total_passengers; i++) {
+            if (passengers[i].shortestPath.active) {
+                if (!passengers[i].simulationFinished) {
+                    allFinished = false;
+
+                    // Render cars using distinct color templates for visual isolation
+                    Color carColor = (i == 0) ? MAROON : (i == 1) ? DARKBLUE : PURPLE;
+                    DrawCar(passengers[i].movingEntity.currentPos, passengers[i].carRotation, carColor);
+
+                    // Display specific process identification context next to the moving vehicle
+                    DrawText(TextFormat("PID: %d", passengers[i].id),
+                             passengers[i].movingEntity.currentPos.x - 20,
+                             passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
+                }
+            }
         }
 
-        // GUI Buttons
+        // Draw Interactive UI Buttons
         DrawRectangleRec(playBtn, isRunning ? LIME : GREEN);
         DrawText("PLAY", playBtn.x + 35, playBtn.y + 10, 20, BLACK);
         DrawRectangleRec(stopBtn, RED);
         DrawText("STOP", stopBtn.x + 35, stopBtn.y + 10, 20, WHITE);
 
-        // Status Overlay
+        // System state text overlays
         if (src != -1 && dst != -1) {
-            DrawText(TextFormat("Query: %d to %d", src, dst), 15, 15, 20, DARKBLUE);
+            DrawText("SYSTEM: MULTI-AGENT TRACKING ACTIVE", 15, 15, 20, DARKBLUE);
             DrawText(isRunning ? "STATUS: RUNNING" : "STATUS: PAUSED", 15, 40, 18, isRunning ? LIME : DARKGRAY);
         }
 
-        if (simulationFinished) {
+        // Display completion panel when all tracking activities are finished
+        if (allFinished && isRunning) {
+            isRunning = false;
             DrawRectangle(200, 250, 400, 100, Fade(GOLD, 0.9f));
             DrawRectangleLines(200, 250, 400, 100, BLACK);
             DrawText("SIMULATION FINISHED!", 230, 285, 25, BLACK);
@@ -145,7 +134,7 @@ int main() {
         EndDrawing();
     }
 
-    free(parent);
+    // Release dynamically allocated resources before system shutdown
     freeGraph(graph);
     CloseWindow();
     return 0;
