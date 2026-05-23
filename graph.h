@@ -6,6 +6,7 @@
 #define EDGE_STEP_MS 300
 #define  NODE_WAIT_TIME 60
 #define EDGE_STEP_TIME 18
+#define MAX_PASSENGERS 20
 
 // Node structure for adjacency list
 typedef struct Node {
@@ -37,6 +38,14 @@ typedef struct {
     int isMoving;
 }Entity;
 
+typedef struct {
+    int id;                   // Unique identifier for the passenger (Child PID)
+    Path shortestPath;        // The specific Dijkstra path for this passenger
+    Entity movingEntity;      // The dynamic animation state for this passenger
+    float carRotation;        // Current rendering angle
+    bool simulationFinished;  // Has this specific passenger reached their destination?
+} Passenger;
+
 Graph* createGraph(int vertices);
 void addEdge(Graph* graph, int src, int dest, int weight);
 Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int* numTravelers);
@@ -46,6 +55,8 @@ void printPath(int* parent, int src, int dst);
 void computePosition(Graph* graph);
 void drawGraph(Graph* graph, Path path);
 Path reconstructPath(int* parent, int src, int dst);
+void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst);
+void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool isRunning);
 void updateEntity(Entity* entity, Graph* graph, Path* path);
 void drawEntity(Entity* entity);
 
