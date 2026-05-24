@@ -64,5 +64,7 @@ void printPath(int* parent, int src, int dst);
 
 // Multi-agent tracking and movement updates
 void updateEntity(Entity* entity, Graph* graph, Path* path);
+void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst);
+void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool isRunning);
 
 #endif // GRAPH_H
