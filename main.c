@@ -3,12 +3,10 @@
 #include "raylib.h"
 #include "graph.h"
 #include <math.h>
-#include "raymath.h"
-
-// Function to draw a car that rotates towards its target position
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <signal.h> // Required for sending system signals (kill)
 
 // Function to handle child process spawning and lifetime management
 void createTravelerProcesses(int numTravelers, pid_t* pids) {
@@ -27,12 +25,12 @@ void createTravelerProcesses(int numTravelers, pid_t* pids) {
             while (1) {
                 sleep(1);
             }
-            exit(0);
+            exit(0); // Safeguard (execution should not reach here unless signaled)
         }
     }
 }
 
-// Function to draw a car with rotation (Member 3 Visuals)
+// Function to draw a car with rotation using standard C math capabilities
 void DrawCar(Vector2 position, float rotation, Color color) {
     float width = 40.0f;
     float height = 20.0f;
@@ -45,232 +43,262 @@ void DrawCar(Vector2 position, float rotation, Color color) {
     Vector2 windowOrigin = { -width / 4, (height - 6) / 2 };
     DrawRectanglePro(window, windowOrigin, rotation, SKYBLUE);
 
-    // Small wheels configuration
-    DrawCircleV(Vector2Add(position, Vector2Rotate((Vector2){-15, -10}, rotation * DEG2RAD)), 4, BLACK);
-    DrawCircleV(Vector2Add(position, Vector2Rotate((Vector2){15, -10}, rotation * DEG2RAD)), 4, BLACK);
-    DrawCircleV(Vector2Add(position, Vector2Rotate((Vector2){-15, 10}, rotation * DEG2RAD)), 4, BLACK);
-    DrawCircleV(Vector2Add(position, Vector2Rotate((Vector2){15, 10}, rotation * DEG2RAD)), 4, BLACK);
+    // Convert rotation from degrees to radians for standard cosf/sinf functions
+    float angleRad = rotation * (PI / 180.0f);
+    float cosA = cosf(angleRad);
+    float sinA = sinf(angleRad);
+
+    // Hardcoded relative offsets for the 4 wheels from the center of the car
+    Vector2 wheelOffsets[4] = {
+        {-15.0f, -10.0f},
+        {15.0f, -10.0f},
+        {-15.0f, 10.0f},
+        {15.0f, 10.0f}
+    };
+
+    // Calculate and draw each wheel position using manual 2D rotation matrix formulas
+    for (int i = 0; i < 4; i++) {
+        // Standard 2D Rotation transformation formulas:
+        // X' = X * cos(A) - Y * sin(A)
+        // Y' = X * sin(A) + Y * cos(A)
+        float rotatedX = wheelOffsets[i].x * cosA - wheelOffsets[i].y * sinA;
+        float rotatedY = wheelOffsets[i].x * sinA + wheelOffsets[i].y * cosA;
+
+        // Add the rotated local offset to the absolute screen position of the car
+        Vector2 finalWheelPos = { position.x + rotatedX, position.y + rotatedY };
+        DrawCircleV(finalWheelPos, 4, BLACK);
+    }
 }
 
+// Unified main function representing the master parent process lifecycle
 int main() {
-    int src, dst;
-    // Load graph structural data and the initial pathfinding query from the configuration file
-    Graph* graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &src, &dst);
-}
-
-int main() {
-    // Pointer arrays and counter to hold dynamic traveler details from file
+    // Dynamic memory buffers to store traveler queries extracted from file
     int* sourcesArray = NULL;
     int* destsArray = NULL;
     int numTravelers = 0;
 
-    // Load graph structure and dynamic travelers arrays from input file
+    // Load graph structural data and the dynamic travelers arrays from the configuration file
     Graph* graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &sourcesArray, &destsArray, &numTravelers);
-    if (graph == NULL) return 1;
+    if (graph == NULL || numTravelers == 0) {
+        printf("Error: Failed to load graph or travelers.\n");
+        return 1;
+    }
 
     // Distribute node positions visually across the screen coordinates
     computePosition(graph);
 
-    // Array to manage and track multiple concurrent passengers within the father process
-    Passenger passengers[MAX_PASSENGERS];
-    int total_passengers = 3; // Set active simulation agent count
+    // Color palette configuration for distinct visual isolation of concurrent agents
+    Color travelerColors[] = { MAROON, DARKBLUE, PURPLE, GREEN, ORANGE, GOLD, LIME };
+    int numAvailableColors = 7;
 
-    // Calculate shortest paths using Dijkstra's algorithm for each concurrent agent
-    // First passenger directly processes the source and destination read from the input file
-    passengers[0].id = 1001;
-    calculatePassengerRoute(graph, &passengers[0], src, dst);
-
-    // Second passenger initialization with a distinct source and destination segment
-    passengers[1].id = 1002;
-    calculatePassengerRoute(graph, &passengers[1], 0, 4);
-
-    // Third passenger initialization for parallel movement tracking
-    passengers[2].id = 1003;
-    calculatePassengerRoute(graph, &passengers[2], 2, 6);
-
-    // Animation control and UI state tracking variables
-    bool isRunning = false;
-    Rectangle playBtn = { 650, 20, 120, 40 };
-    Rectangle stopBtn = { 650, 70, 120, 40 };
-
-    // Initialize Raylib layout window configurations
-    InitWindow(800, 600, "Multi-Agent Graph Simulation");
-    // Temporary backup to keep existing single-car logic active without breaking dijkstra
-    int src = (numTravelers > 0) ? sourcesArray[0] : -1;
-    int dst = (numTravelers > 0) ? destsArray[0] : -1;
-
-    // Allocate dynamic memory on the Heap to store child process IDs
+    // Dynamically allocate tracking arrays based on the total travelers count found in the file
+    Passenger* passengers = (Passenger*)malloc(sizeof(Passenger) * numTravelers);
     pid_t* pids = (pid_t*)malloc(sizeof(pid_t) * numTravelers);
-    if (pids == NULL) {
-        printf("Error: Memory allocation failed for PIDs.\n");
-        freeGraph(graph);
-        free(sourcesArray);
-        free(destsArray);
-        free(parent);
+
+    if (passengers == NULL || pids == NULL) {
+        printf("Error: Memory allocation failed.\n");
         return 1;
     }
 
-    // Call helper function to fork traveler processes and print their PIDs
-    createTravelerProcesses(numTravelers, pids);
+    // Initialize state profiles and compute shortest paths using Dijkstra's algorithm inside the parent
+    for (int i = 0; i < numTravelers; i++) {
+        passengers[i].carRotation = 0.0f;
 
-    // Calculate shortest path if nodes are valid
-    if (src != -1 && dst != -1) {
-        dijkstra(graph, src, dst, parent);
-        shortestPath = reconstructPath(parent, src, dst);
+        // Execute routing calculations for each distinct passenger segment
+        int parent[100]; // Temporary backtracking layout buffer for Dijkstra
+        dijkstra(graph, sourcesArray[i], destsArray[i], parent);
+        passengers[i].shortestPath = reconstructPath(parent, sourcesArray[i], destsArray[i]);
+
+        // Setup rendering runtime metrics inside the underlying moving entity structure
+        if (passengers[i].shortestPath.active && passengers[i].shortestPath.count > 0) {
+            passengers[i].movingEntity.currentPos = graph->positions[passengers[i].shortestPath.nodes[0]];
+            passengers[i].movingEntity.currentPathIndex = 0;
+            passengers[i].movingEntity.currentStep = 0;
+            passengers[i].movingEntity.frameCounter = 0;
+            passengers[i].movingEntity.isMoving = false;
+            passengers[i].movingEntity.isWaiting = true; // Wait stage triggers at the origin node
+        }
+        passengers[i].simulationFinished = false;
     }
 
+    // Call helper function to fork traveler processes concurrently for the FIRST run
+    createTravelerProcesses(numTravelers, pids);
+
+    // Bind the actual system-assigned process identifiers (PIDs) to the corresponding passenger structs
+    for (int i = 0; i < numTravelers; i++) {
+        passengers[i].id = pids[i];
+    }
+
+    // Initialize Raylib runtime display context
+    InitWindow(800, 600, "SO Project - Milestone 4 Multi-Agent Simulation");
+    SetTargetFPS(60);
+
     bool isRunning = false;
-    bool simulationFinished = false;
-    float carRotation = 0.0f;
     Rectangle playBtn = { 650, 20, 120, 40 };
     Rectangle stopBtn = { 650, 70, 120, 40 };
 
-    // Initialize the Entity according to the struct
-    Entity movingEntity = { 0 };
-    if (shortestPath.active && shortestPath.count > 0) {
-        movingEntity.currentPos = graph->positions[shortestPath.nodes[0]];
-        movingEntity.currentPathIndex = 0;
-        movingEntity.isMoving = false;
-        movingEntity.isWaiting = true; // Wait at the first node
-    }
-
-    InitWindow(800, 600, "SO Project - Final Milestone 3");
-    SetTargetFPS(60);
-
-    // Main real-time execution loop
+    // Main real-time graphics and simulation loop
     while (!WindowShouldClose()) {
-        // UI Navigation and Button Interaction logic
-        // --- Input Handling ---
+        // --- 1. Input Handling & UI Button Interaction Logic ---
         Vector2 mousePoint = GetMousePosition();
 
-        // Handle Play/Replay button
+        // Check if all concurrent tracking tasks are finished before handling input
+        bool allFinished = true;
+        for (int i = 0; i < numTravelers; i++) {
+            if (!passengers[i].simulationFinished) {
+                allFinished = false;
+                break;
+            }
+        }
+
         if (CheckCollisionPointRec(mousePoint, playBtn) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            isRunning = true;
+            // If all agents had already arrived, reset everything for a fresh restart
+            if (allFinished) {
+                printf("[PARENT] Restarting simulation. Re-spawning child processes...\n");
 
-            // Automatically reset and recalculate routing states if simulation was completed
-            for (int i = 0; i < total_passengers; i++) {
-                if (passengers[i].simulationFinished) {
-                    calculatePassengerRoute(graph, &passengers[i],
-                                            i == 0 ? src : i == 1 ? 0 : 2,
-                                            i == 0 ? dst : i == 1 ? 4 : 6);
+                // Reap old dead processes just in case
+                for (int i = 0; i < numTravelers; i++) {
+                    waitpid(pids[i], NULL, WNOHANG);
                 }
-            // Reset simulation if it has already finished
-            if (simulationFinished) {
-                movingEntity.currentPathIndex = 0;
-                movingEntity.currentStep = 0;
-                movingEntity.frameCounter = 0;
-                movingEntity.isWaiting = true;
-                movingEntity.currentPos = graph->positions[shortestPath.nodes[0]];
-                simulationFinished = false;
+
+                // Fork brand new child processes for the new run
+                createTravelerProcesses(numTravelers, pids);
+
+                // Reset positions, path counters and state flags for all travelers
+                for (int i = 0; i < numTravelers; i++) {
+                    passengers[i].id = pids[i]; // Bind new PIDs
+                    passengers[i].simulationFinished = false;
+                    passengers[i].carRotation = 0.0f;
+
+                    if (passengers[i].shortestPath.active && passengers[i].shortestPath.count > 0) {
+                        passengers[i].movingEntity.currentPos = graph->positions[passengers[i].shortestPath.nodes[0]];
+                        passengers[i].movingEntity.currentPathIndex = 0;
+                        passengers[i].movingEntity.currentStep = 0;
+                        passengers[i].movingEntity.frameCounter = 0;
+                        passengers[i].movingEntity.isMoving = true; // Start moving immediately on restart
+                        passengers[i].movingEntity.isWaiting = true;
+                    }
+                }
+                allFinished = false;
+            } else {
+                // Regular Resume functionality if the simulation was just paused
+                for (int i = 0; i < numTravelers; i++) {
+                    if (!passengers[i].simulationFinished) {
+                        passengers[i].movingEntity.isMoving = true;
+                    }
+                }
             }
-            movingEntity.isMoving = true;
             isRunning = true;
         }
 
-        // Handle Stop button
         if (CheckCollisionPointRec(mousePoint, stopBtn) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            movingEntity.isMoving = false;
             isRunning = false;
-        }
-
-        // Advance positions simultaneously for all active tracking agents based on runtime state
-        updateAllPassengers(graph, passengers, total_passengers, isRunning);
-        // --- Logic Update ---
-        if (isRunning && !simulationFinished) {
-            // Calculate rotation based on the current direction of movement
-            if (movingEntity.currentPathIndex < shortestPath.count - 1) {
-                Vector2 current = graph->positions[shortestPath.nodes[movingEntity.currentPathIndex]];
-                Vector2 next = graph->positions[shortestPath.nodes[movingEntity.currentPathIndex + 1]];
-                carRotation = atan2f(next.y - current.y, next.x - current.x) * (180.0f / PI);
-            }
-
-            // Update entity movement using the time-based or frame-based logic
-            updateEntity(&movingEntity, graph, &shortestPath);
-
-            // Mark simulation as finished when destination is reached
-            if (!movingEntity.isMoving && movingEntity.currentPathIndex >= shortestPath.count - 1) {
-                simulationFinished = true;
-                isRunning = false;
+            for (int i = 0; i < numTravelers; i++) {
+                passengers[i].movingEntity.isMoving = false;
             }
         }
 
-        // Graphics Rendering Stage
+        // --- 2. Concurrent Logic Update ---
+        if (isRunning) {
+            for (int i = 0; i < numTravelers; i++) {
+                if (!passengers[i].simulationFinished && passengers[i].shortestPath.active) {
+
+                    int idx = passengers[i].movingEntity.currentPathIndex;
+
+                    // Calculate rotation based on the vector from the current animated position to the next structural node position
+                    if (idx < passengers[i].shortestPath.count - 1) {
+                        int nextNode = passengers[i].shortestPath.nodes[idx + 1];
+                        Vector2 nextNodePos = graph->positions[nextNode];
+                        Vector2 currentPos = passengers[i].movingEntity.currentPos;
+
+                        float angle = atan2f(nextNodePos.y - currentPos.y, nextNodePos.x - currentPos.x) * (180.0f / PI);
+                        passengers[i].carRotation = angle;
+                    }
+
+                    // Advance position coordinates simultaneously for the active tracking entity
+                    updateEntity(&passengers[i].movingEntity, graph, &passengers[i].shortestPath);
+
+                    // Check if the individual agent reached its destination node
+                    if (!passengers[i].movingEntity.isMoving && idx >= passengers[i].shortestPath.count - 1) {
+                        passengers[i].simulationFinished = true;
+
+                        // Parent sends kill signal to terminate child upon arrival
+                        kill(passengers[i].id, SIGKILL);
+                        printf("[PARENT] Traveler PID %d reached destination. Signal sent.\n", passengers[i].id);
+                    }
+                }
+            }
+        }
+
+        // Re-evaluate if all finished to accurately draw the overlay state
+        allFinished = true;
+        for (int i = 0; i < numTravelers; i++) {
+            if (!passengers[i].simulationFinished) {
+                allFinished = false;
+                break;
+            }
+        }
+        if (allFinished) {
+            isRunning = false; // Turn off running state when everything finishes
+        }
+
+        // --- 3. Graphics Rendering Stage ---
         BeginDrawing();
         ClearBackground(RAYWHITE);
 
-        // Render base graph network paths on screen
-        drawGraph(graph, passengers[0].shortestPath);
+        // Render the base graph network paths on screen
+        Path emptyPath = { .active = false };
+        drawGraph(graph, emptyPath);
 
-        // Iterate through tracking array to render each active entity dynamically
-        bool allFinished = true;
-        for (int i = 0; i < total_passengers; i++) {
-            if (passengers[i].shortestPath.active) {
-                if (!passengers[i].simulationFinished) {
-                    allFinished = false;
+        // Render all active traveling entities concurrently using unique color layouts
+        for (int i = 0; i < numTravelers; i++) {
+            if (passengers[i].shortestPath.active && !passengers[i].simulationFinished) {
+                Color carColor = travelerColors[i % numAvailableColors]; // Map distinct color template
+                DrawCar(passengers[i].movingEntity.currentPos, passengers[i].carRotation, carColor);
 
-                    // Render cars using distinct color templates for visual isolation
-                    Color carColor = (i == 0) ? MAROON : (i == 1) ? DARKBLUE : PURPLE;
-                    DrawCar(passengers[i].movingEntity.currentPos, passengers[i].carRotation, carColor);
-
-                    // Display specific process identification context next to the moving vehicle
-                    DrawText(TextFormat("PID: %d", passengers[i].id),
-                             passengers[i].movingEntity.currentPos.x - 20,
-                             passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
-                }
+                // Display the real OS process identification context next to the moving vehicle
+                DrawText(TextFormat("PID: %d", passengers[i].id),
+                         passengers[i].movingEntity.currentPos.x - 20,
+                         passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
             }
         }
 
         // Draw Interactive UI Buttons
-        // Draw graph nodes and edges
-        drawGraph(graph, shortestPath);
-
-        // Draw the vehicle if path is active
-        if (shortestPath.active) {
-            DrawCar(movingEntity.currentPos, carRotation, MAROON);
-        }
-
-        // GUI Buttons Rendering
         DrawRectangleRec(playBtn, isRunning ? LIME : GREEN);
-        DrawRectangleLinesEx(playBtn, 2, DARKGREEN);
-        const char* playText = simulationFinished ? "REPLAY" : "PLAY";
-        DrawText(playText, playBtn.x + (simulationFinished ? 20 : 35), playBtn.y + 10, 20, BLACK);
+        DrawText(allFinished ? "RESTART" : "PLAY", playBtn.x + (allFinished ? 15 : 35), playBtn.y + 10, 20, BLACK);
 
         DrawRectangleRec(stopBtn, RED);
-        DrawRectangleLinesEx(stopBtn, 2, MAROON);
         DrawText("STOP", stopBtn.x + 35, stopBtn.y + 10, 20, WHITE);
 
         // System state text overlays
-        if (src != -1 && dst != -1) {
-            DrawText("SYSTEM: MULTI-AGENT TRACKING ACTIVE", 15, 15, 20, DARKBLUE);
+        DrawText("SYSTEM: MULTI-AGENT OS SIMULATION ACTIVE", 15, 15, 20, DARKBLUE);
+        if (allFinished) {
+            DrawText("STATUS: ALL AGENTS ARRIVED (PRESS RESTART)", 15, 40, 18, GOLD);
+        } else {
             DrawText(isRunning ? "STATUS: RUNNING" : "STATUS: PAUSED", 15, 40, 18, isRunning ? LIME : DARKGRAY);
         }
 
-        // Display completion panel when all tracking activities are finished
-        if (allFinished && isRunning) {
-            isRunning = false;
-        // Display completion message
-        if (simulationFinished) {
-            DrawRectangle(200, 250, 400, 100, Fade(GOLD, 0.9f));
-            DrawText("SIMULATION FINISHED!", 225, 285, 25, BLACK);
-        }
-
         EndDrawing();
-    }
+    } // <--- לולאת ה-while הראשית של Raylib נסגרת כאן בצורה תקינה!
 
-    // Release dynamically allocated resources before system shutdown
-    // Cleanup
-    free(parent);
-    freeGraph(graph);
+    // --- 4. Cleanup & Resource Deallocation Stage ---
     CloseWindow();
 
     // Loop through all child PIDs and reap them to prevent zombie processes
     for (int i = 0; i < numTravelers; i++) {
-        waitpid(pids[i], NULL, 0); // Wait for each child process to finish completely
+        if (!passengers[i].simulationFinished) {
+            kill(pids[i], SIGKILL);
+        }
+        waitpid(pids[i], NULL, 0); // Reaping operation
     }
 
-    // Free all dynamically allocated travelers buffers to avoid leaks
+    // Free all dynamically allocated heap memory buffers to prevent memory leaks
     free(sourcesArray);
     free(destsArray);
     free(pids);
+    free(passengers);
+    freeGraph(graph);
+
+    printf("[PARENT] All children reaped. Exiting cleanly.\n");
     return 0;
 }
