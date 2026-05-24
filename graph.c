@@ -5,6 +5,7 @@
 #include "graph.h"
 #include <stdbool.h>
 #include <math.h>
+#include <string.h>
 
 // Create a new graph with a given number of vertices
 Graph* createGraph(int vertices){
@@ -375,4 +376,69 @@ void drawEntity(Entity* entity) {
     DrawCircleLinesV(entity->currentPos, 12, MAROON);
 
     DrawText("BUS", entity->currentPos.x - 15, entity->currentPos.y - 25, 12, DARKGRAY);
+}
+
+/* Dynamic path calculation for a single passenger using Dijkstra's output */
+void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst) {
+    if (src == -1 || dst == -1) return;
+
+    int* parent = (int*)malloc(graph->numVertices * sizeof(int));
+    if (parent == NULL) return;
+
+    dijkstra(graph, src, dst, parent);
+    passenger->shortestPath = reconstructPath(parent, src, dst);
+
+    passenger->simulationFinished = false;
+    passenger->carRotation = 0.0f;
+
+    if (passenger->shortestPath.active && passenger->shortestPath.count > 0) {
+        passenger->movingEntity.currentPos = graph->positions[passenger->shortestPath.nodes[0]];
+        passenger->movingEntity.currentPathIndex = 0;
+        passenger->movingEntity.isMoving = 1;
+    }
+
+    free(parent);
+}
+
+/* Multi-agent system tracking to advance all active travelers simultaneously */
+void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool isRunning) {
+    if (!isRunning) return;
+
+    for (int i = 0; i < count; i++) {
+        Passenger* p = &passengers[i];
+
+        if (p->simulationFinished || !p->shortestPath.active) continue;
+
+        if (p->movingEntity.currentPathIndex < p->shortestPath.count - 1) {
+            int currNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
+            int nextNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex + 1];
+
+            float weight = 1.0f;
+            Node* temp = graph->adjLists[currNode];
+            while (temp) {
+                if (temp->dest == nextNode) { weight = (float)temp->weight; break; }
+                temp = temp->next;
+            }
+
+            float baseSpeed = 5.0f;
+            float dynamicSpeed = baseSpeed / weight;
+
+            Vector2 targetPos = graph->positions[nextNode];
+            float dx = targetPos.x - p->movingEntity.currentPos.x;
+            float dy = targetPos.y - p->movingEntity.currentPos.y;
+            float distance = sqrtf(dx * dx + dy * dy);
+
+            p->carRotation = atan2f(dy, dx) * (180.0f / PI);
+
+            if (distance > dynamicSpeed) {
+                p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
+                p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
+            } else {
+                p->movingEntity.currentPos = targetPos;
+                p->movingEntity.currentPathIndex++;
+            }
+        } else {
+            p->simulationFinished = true;
+        }
+    }
 }
