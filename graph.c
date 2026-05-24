@@ -1,64 +1,59 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
-#include <math.h>
-#include <string.h>
 #include "raylib.h"
 #include "graph.h"
+#include <stdbool.h>
+#include <math.h>
+#include <string.h>
 
-// Dynamically allocates memory for a new graph structure and initializes its adjacency list
-Graph* createGraph(int vertices) {
+// Create a new graph with a given number of vertices
+Graph* createGraph(int vertices){
     Graph* graph = (Graph*)malloc(sizeof(Graph));
     graph->numVertices = vertices;
-
-    // Allocate memory for an array of pointers representing head nodes of the adjacency lists
     graph->adjLists = (Node**)malloc(vertices * sizeof(Node*));
+
     for (int i = 0; i < vertices; i++) {
         graph->adjLists[i] = NULL;
     }
-
-    // Allocate memory for storing the 2D visual screen coordinates of each graph vertex
     graph->positions = (Vector2*)malloc(vertices * sizeof(Vector2));
     return graph;
 }
 
-// Instantiates a new node and inserts it at the beginning of the source vertex's adjacency list
+// Add an edge to the graph
 void addEdge(Graph* graph, int src, int dest, int weight) {
     Node* newNode = (Node*)malloc(sizeof(Node));
     newNode->dest = dest;
     newNode->weight = weight;
-
-    // Link the new node to point to the current head of the adjacency list
     newNode->next = graph->adjLists[src];
-
-    // Move the head of the adjacency list to point to this new node
     graph->adjLists[src] = newNode;
 }
 
-// Loads graph structural architecture and parses dynamic travelers queries from input configuration file
+// Load graph structure and dynamic travelers arrays from the input file
 Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int* numTravelers) {
-    // Open the input configuration file for reading operations only
+
+    // Open the input file for reading operations only
     FILE* file = fopen(filename, "r");
     if (!file) {
         printf("Error: Could not open file.\n");
         return NULL;
     }
 
-    // Read the total number of vertices (n) and edges (m) from the configuration file layout
+    // Read the total number of vertices (n) and edges (m) from the first line
     int n, m;
     if (fscanf(file, "%d %d", &n, &m) != 2) {
         fclose(file);
         return NULL;
     }
 
-    // Allocate memory and initialize the master graph structure metadata
+    // Allocate memory and initialize the graph structure
     Graph* graph = createGraph(n);
 
-    // Loop through all defined structural edges and link them to the adjacency list maps
+    // Loop through all edges and add them to the adjacency list
     for (int i = 0; i < m; i++) {
         int u, v, w;
         if (fscanf(file, "%d %d %d", &u, &v, &w) == 3) {
-            // Validate that edge weights are non-negative to ensure core Dijkstra calculation correctness
+            // Validate that edge weights are non-negative to ensure Dijkstra correctness
             if (w < 0) {
                 printf("Error: Invalid input. Weights cannot be negative.\n");
                 fclose(file);
@@ -72,16 +67,16 @@ Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsAr
     char line[256];
     bool foundTravelers = false;
 
-    // Scan the configuration template line-by-line to locate the specific travelers section header
+    // Scan the file line by line to locate the travelers header
     while (fgets(line, sizeof(line), file)) {
-        // Match the travelers tracking keyword layout to begin parallel queries parsing
+        // Look for the keyword travelers dynamically to ensure reliable parsing
         if (strstr(line, "travelers") != NULL) {
             foundTravelers = true;
             break;
         }
     }
 
-    // Handle structural errors gracefully if the required travelers context block is missing
+    // Handle the error case where the travelers section is missing
     if (!foundTravelers) {
         printf("Error: No Travelers found.\n");
         *numTravelers = 0;
@@ -91,7 +86,7 @@ Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsAr
         return graph;
     }
 
-    // Read total discrete tracking target passenger agent entries declared right under header
+    // Read the total number of travelers located right under the header
     if (fscanf(file, "%d", numTravelers) != 1) {
         printf("Error: could not read number of travelers.\n");
         *numTravelers = 0;
@@ -99,11 +94,11 @@ Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsAr
         return graph;
     }
 
-    // Dynamic memory allocation on heap to establish distinct tracking coordinate arrays
+    // Allocate dynamic memory on the Heap for source and destination arrays
     *sourcesArray = (int*)malloc((*numTravelers) * sizeof(int));
     *destsArray = (int*)malloc((*numTravelers) * sizeof(int));
 
-    // Verify system memory context allocations succeeded cleanly without throwing segments fault
+    // Verify that memory allocation for the dynamic arrays succeeded completely
     if (*sourcesArray == NULL || *destsArray == NULL) {
         printf("Error: Memory allocation failed for travelers arrays.\n");
         *numTravelers = 0;
@@ -111,8 +106,9 @@ Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsAr
         return graph;
     }
 
-    // Map source and destination query pairs directly into target logical array layouts
+    // Read all individual source and destination pairs into the allocated arrays
     for (int i = 0; i < *numTravelers; i++) {
+        // Extract traveler data directly into the array indices via pointers
         if (fscanf(file, "%d %d", &((*sourcesArray)[i]), &((*destsArray)[i])) != 2) {
             printf("Warning: Error reading data for traveler %d. Setting to -1.\n", i);
             (*sourcesArray)[i] = -1;
@@ -124,11 +120,9 @@ Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsAr
     return graph;
 }
 
-// Safely deallocates all heap-allocated graph memory, including linked list nodes and inner arrays
+//Clean up memory to prevent leaks
 void freeGraph(Graph* graph) {
     if (!graph) return;
-
-    // Traverse each vertex and free all nodes allocated in its adjacency linked list
     for (int i = 0; i < graph->numVertices; i++) {
         Node* temp = graph->adjLists[i];
         while (temp) {
@@ -137,14 +131,12 @@ void freeGraph(Graph* graph) {
             free(toDelete);
         }
     }
-
-    // Free the master pointer arrays and the structural container itself
     free(graph->adjLists);
     free(graph->positions);
     free(graph);
 }
 
-// Implements Dijkstra's algorithm to compute shortest paths and records structural parents for backtracking
+// Finds the shortest path cost from source to destination.
 int dijkstra(Graph* graph, int src, int dst, int parent[]) {
     if (graph == NULL || src < 0 || src >= graph->numVertices || dst < 0 || dst >= graph->numVertices) {
         return -1;
@@ -154,38 +146,25 @@ int dijkstra(Graph* graph, int src, int dst, int parent[]) {
     int* distances = (int*)malloc(numVertices * sizeof(int));
     int* visited = (int*)malloc(numVertices * sizeof(int));
 
-    // Initialize all tracking metrics: paths are undiscovered (infinity) and nodes are unvisited
     for (int i = 0; i < numVertices; i++) {
         distances[i] = INT_MAX;
         visited[i] = 0;
         parent[i] = -1;
     }
-
-    // Distance from the origin vertex to itself is always zero
     distances[src] = 0;
-
-    // Find the shortest path for all vertices sequentially
     for (int i = 0; i < numVertices - 1; i++) {
         int minDistance = INT_MAX;
         int u = -1;
-
-        // Select the unvisited vertex with the minimum distance metric calculated so far
         for (int v = 0; v < numVertices; v++) {
             if (visited[v] == 0 && distances[v] <= minDistance) {
                 minDistance = distances[v];
                 u = v;
             }
         }
-
-        // Terminate parsing if remaining nodes are unreachable or destination is safely resolved
         if (u == -1 || distances[u] == INT_MAX || u == dst) {
             break;
         }
-
-        // Mark the selected vertex as processed
         visited[u] = 1;
-
-        // Relax adjacent vertices by updating weight metrics through the selected node 'u'
         Node* current = graph->adjLists[u];
         while (current) {
             int v = current->dest;
@@ -193,96 +172,62 @@ int dijkstra(Graph* graph, int src, int dst, int parent[]) {
 
             if (!visited[v] && distances[u] != INT_MAX && (distances[u] + weight < distances[v])) {
                 distances[v] = distances[u] + weight;
-                parent[v] = u; // Store predecessor mapping for path reconstruction
+                parent[v] = u;
             }
             current = current->next;
         }
     }
-
     int result = distances[dst];
     free(distances);
     free(visited);
 
-    return result; // Returns total cost of shortest path, or INT_MAX if no path exists
+    return result;
 }
 
-// Backtracks through the parent array from destination to source to construct a sequential node array
-Path reconstructPath(int* parent, int src, int dst) {
-    Path p;
-    p.count = 0;
-    p.active = false;
-
-    // Return an inactive path container if endpoints are invalid or disconnected
-    if (dst == -1 || (parent[dst] == -1 && src != dst)) {
-        return p;
+// printing path
+void printPath(int* parent, int src, int dst) {
+    if (dst == src) {
+        printf("%d", src);
+        return;
     }
-
-    int current = dst;
-    int tempPath[100];
-    int tempCount = 0;
-
-    // Collect routing elements backward from target destination back to origin source
-    while (current != -1) {
-        tempPath[tempCount++] = current;
-        if (current == src) break;
-        current = parent[current];
-    }
-
-    // Reverse the temporary path list into the final path object to order it from source to destination
-    for (int i = 0; i < tempCount; i++) {
-        p.nodes[i] = tempPath[tempCount - 1 - i];
-    }
-
-    p.count = tempCount;
-    p.active = true;
-
-    return p;
+    printPath(parent, src, parent[dst]);
+    printf(" -> %d", dst);
 }
 
-// Distributes graph vertices logically across a grid topology layout with mild randomized offsets
 void computePosition(Graph* graph) {
     if (!graph || graph->numVertices <= 0) {
         return;
     }
-
     int cols = 4;
     int rows = (graph->numVertices / cols) + 1;
     float cellWidth = 800.0f / cols;
     float cellHeight = 600.0f / rows;
-
-    // Assign pixel locations on screen based on matrix grid calculations with spatial noise
     for (int i = 0; i < graph->numVertices; i++) {
         int r = i / cols;
         int c = i % cols;
         float baseX = (c * cellWidth) + (cellWidth / 2.0f);
         float baseY = (r * cellHeight) + (cellHeight / 2.0f);
 
-        // Apply controlled variations to avoid linear overlapping alignments
         graph->positions[i].x = baseX + GetRandomValue(-20, 20);
         graph->positions[i].y = baseY + GetRandomValue(-20, 20);
     }
 }
 
-// Iterates through the graph network mapping connections, directional arrows, and weights onto the display
 void drawGraph(Graph* graph, Path path) {
     if (!graph) return;
 
     const char* cityNames[] = {"Jerusalem", "Tel Aviv", "Haifa", "Eilat", "Beersheba", "Ashdod", "Tiberias"};
+    ClearBackground((Color){ 240, 242, 245, 255 });
 
-    // Render directed edges connecting vertices
     for (int i = 0; i < graph->numVertices; i++) {
         Node* temp = graph->adjLists[i];
         while (temp) {
             Vector2 startPos = graph->positions[i];
             Vector2 endPos = graph->positions[temp->dest];
 
-            Color edgeColor = (Color){ 160, 160, 160, 255 }; // Default structural edge color
+            Color edgeColor = (Color){ 160, 160, 160, 255 };
             float thickness = 2.0f;
 
-            // =================================================================
-            // MILESTONE 4 FEATURE: Concurrent Path Highlight Check
-            // =================================================================
-            // Highlight the path if the current edge is part of an active agent's trajectory
             if (path.active) {
                 for (int k = 0; k < path.count - 1; k++) {
                     if (path.nodes[k] == i && path.nodes[k+1] == temp->dest) {
@@ -292,11 +237,8 @@ void drawGraph(Graph* graph, Path path) {
                     }
                 }
             }
-
-            // Draw the structural link line between node centers
             DrawLineEx(startPos, endPos, thickness, edgeColor);
 
-            // Compute vector metrics for directional arrowhead markers and overlay text indicators
             float dx = endPos.x - startPos.x;
             float dy = endPos.y - startPos.y;
             float length = sqrtf(dx * dx + dy * dy);
@@ -304,11 +246,8 @@ void drawGraph(Graph* graph, Path path) {
             if (length > 0) {
                 Vector2 unitDir = { dx / length, dy / length };
 
-                // Place directional arrowheads outside the bounding radius circumference of target node circles
                 Vector2 arrowPos = { endPos.x - unitDir.x * 28, endPos.y - unitDir.y * 28 };
                 DrawPoly(arrowPos, 3, 7, atan2f(dy, dx) * RAD2DEG, edgeColor);
-
-                // Calculate position offsets for drawing edge cost weights at one-third of segment length
                 Vector2 weightPos = {
                     startPos.x + unitDir.x * (length * 0.33f),
                     startPos.y + unitDir.y * (length * 0.33f)
@@ -319,7 +258,6 @@ void drawGraph(Graph* graph, Path path) {
                 int fontSize = 14;
                 int textWidth = MeasureText(weightStr, fontSize);
 
-                // Draw background box for legible edge cost reading
                 DrawRectangle(weightPos.x - (textWidth/2 + 3), weightPos.y - 9, textWidth + 6, 18, (Color){ 231, 76, 60, 255 });
                 DrawText(weightStr, weightPos.x - textWidth/2, weightPos.y - 7, fontSize, WHITE);
             }
@@ -327,46 +265,65 @@ void drawGraph(Graph* graph, Path path) {
         }
     }
 
-    // Render nodes visually on screen with embedded index value IDs and label tags
     for (int i = 0; i < graph->numVertices; i++) {
         Vector2 pos = graph->positions[i];
         float radius = 22.0f;
 
-        // Draw node circles
         DrawCircleV(pos, radius, (Color){ 44, 62, 80, 255 });
         DrawCircleLinesV(pos, radius, (Color){ 52, 152, 219, 255 });
 
-        // Print vertex identifier numerical tag centered within the circle
         char idStr[16];
         sprintf(idStr, "%d", i);
         int idWidth = MeasureText(idStr, 18);
         DrawText(idStr, pos.x - idWidth / 2, pos.y - 9, 18, WHITE);
 
-        // Map representative geographical name labels to the initial 7 structural nodes
         if (i < 7) {
             int cityFontSize = 16;
             int cityNameWidth = MeasureText(cityNames[i], cityFontSize);
-            float yOffset = (pos.y < 300) ? -45 : 30; // Flip label positions based on quadrant elevation to avoid overlap
+            float yOffset = (pos.y < 300) ? -45 : 30;
 
             DrawText(cityNames[i], pos.x - (cityNameWidth / 2), pos.y + yOffset, cityFontSize, (Color){ 44, 62, 80, 255 });
         }
     }
 }
 
-// Advances an entity's linear translation coordinates step-by-step between tracking path intersections
+Path reconstructPath(int* parent, int src, int dst) {
+    Path p;
+    p.count = 0;
+    p.active = false;
+
+    if (dst == -1 || (parent[dst] == -1 && src != dst)) {
+        return p;
+    }
+
+    int current = dst;
+    int tempPath[100];
+    int tempCount = 0;
+
+    while (current != -1) {
+        tempPath[tempCount++] = current;
+        if (current == src) break;
+        current = parent[current];
+    }
+
+    for (int i = 0; i < tempCount; i++) {
+        p.nodes[i] = tempPath[tempCount - 1 - i];
+    }
+
+    p.count = tempCount;
+    p.active = true;
+
+    return p;
+}
+
 void updateEntity(Entity* entity, Graph* graph, Path* path) {
-    // =================================================================
-    // MILESTONE 4 START: Concurrent Multi-Agent Position Interpolation
-    // =================================================================
     if (!entity->isMoving || !path->active || entity->currentPathIndex >= path->count - 1) {
         return;
     }
 
-    // Fetch endpoints of current edge segment traversal path
     int u = path->nodes[entity->currentPathIndex];
     int v = path->nodes[entity->currentPathIndex + 1];
 
-    // Read weight value from graph properties to dictate time-based distance scales
     int weight = 1;
     Node* temp = graph->adjLists[u];
     while (temp) {
@@ -377,10 +334,9 @@ void updateEntity(Entity* entity, Graph* graph, Path* path) {
         temp = temp->next;
     }
 
-    // Handle station pause delay when intersection boundaries are intersected
     if (entity->isWaiting) {
         entity->frameCounter++;
-        if (entity->frameCounter >= 60) { // Unblock moving states after 60 frames (1 second at 60FPS)
+        if (entity->frameCounter >= 60) {
             entity->isWaiting = false;
             entity->frameCounter = 0;
             entity->currentStep = 0;
@@ -390,29 +346,99 @@ void updateEntity(Entity* entity, Graph* graph, Path* path) {
 
     entity->frameCounter++;
 
-    // Increment movement calculations every 18 frames
     if (entity->frameCounter >= 18) {
         entity->currentStep++;
         entity->frameCounter = 0;
 
-        // Calculate interpolation factor 't' relative to edge weight
         float t = (float)entity->currentStep / weight;
+
         if (t > 1.0f) t = 1.0f;
 
-        // Perform linear interpolation to find intermediate vehicle location coordinates
         entity->currentPos.x = graph->positions[u].x + t * (graph->positions[v].x - graph->positions[u].x);
         entity->currentPos.y = graph->positions[u].y + t * (graph->positions[v].y - graph->positions[u].y);
 
-        // Check if traveler has arrived at the target end node of the current edge
         if (entity->currentStep >= weight) {
             entity->currentPathIndex++;
 
-            // Shift index to next edge node or finalize movement if total route concludes
             if (entity->currentPathIndex < path->count - 1) {
-                entity->isWaiting = true; // Trigger station delay state
+                entity->isWaiting = true;
             } else {
-                entity->isMoving = false;  // Destination achieved
+                entity->isMoving = false;
             }
+        }
+    }
+}
+
+void drawEntity(Entity* entity) {
+    if (!entity->isMoving && entity->currentPathIndex == 0) return;
+
+    DrawCircleV(entity->currentPos, 12, RED);
+    DrawCircleLinesV(entity->currentPos, 12, MAROON);
+
+    DrawText("BUS", entity->currentPos.x - 15, entity->currentPos.y - 25, 12, DARKGRAY);
+}
+
+/* Dynamic path calculation for a single passenger using Dijkstra's output */
+void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst) {
+    if (src == -1 || dst == -1) return;
+
+    int* parent = (int*)malloc(graph->numVertices * sizeof(int));
+    if (parent == NULL) return;
+
+    dijkstra(graph, src, dst, parent);
+    passenger->shortestPath = reconstructPath(parent, src, dst);
+
+    passenger->simulationFinished = false;
+    passenger->carRotation = 0.0f;
+
+    if (passenger->shortestPath.active && passenger->shortestPath.count > 0) {
+        passenger->movingEntity.currentPos = graph->positions[passenger->shortestPath.nodes[0]];
+        passenger->movingEntity.currentPathIndex = 0;
+        passenger->movingEntity.isMoving = 1;
+    }
+
+    free(parent);
+}
+
+/* Multi-agent system tracking to advance all active travelers simultaneously */
+void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool isRunning) {
+    if (!isRunning) return;
+
+    for (int i = 0; i < count; i++) {
+        Passenger* p = &passengers[i];
+
+        if (p->simulationFinished || !p->shortestPath.active) continue;
+
+        if (p->movingEntity.currentPathIndex < p->shortestPath.count - 1) {
+            int currNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
+            int nextNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex + 1];
+
+            float weight = 1.0f;
+            Node* temp = graph->adjLists[currNode];
+            while (temp) {
+                if (temp->dest == nextNode) { weight = (float)temp->weight; break; }
+                temp = temp->next;
+            }
+
+            float baseSpeed = 5.0f;
+            float dynamicSpeed = baseSpeed / weight;
+
+            Vector2 targetPos = graph->positions[nextNode];
+            float dx = targetPos.x - p->movingEntity.currentPos.x;
+            float dy = targetPos.y - p->movingEntity.currentPos.y;
+            float distance = sqrtf(dx * dx + dy * dy);
+
+            p->carRotation = atan2f(dy, dx) * (180.0f / PI);
+
+            if (distance > dynamicSpeed) {
+                p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
+                p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
+            } else {
+                p->movingEntity.currentPos = targetPos;
+                p->movingEntity.currentPathIndex++;
+            }
+        } else {
+            p->simulationFinished = true;
         }
     }
 }
