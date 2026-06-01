@@ -3,6 +3,7 @@
 
 #include "raylib.h"
 #include <stdbool.h>
+#include <semaphore.h>
 
 // Timing constants for entity movement rendering animations
 #define NODE_WAIT_TIME 60   // Number of frames to pause at a vertex intersection (1 second at 60 FPS)
@@ -21,7 +22,9 @@ typedef struct {
     int numVertices;           // Total number of vertices populated in the system
     Node** adjLists;           // Dynamic array of head pointers forming individual adjacency lists
     Vector2* positions;        // Screen coordinate locations (X, Y pixels) assigned to vertices for rendering
+    sem_t* semaphores;         // Pointer to a contiguous shared memory array of vertex intersection semaphores
 } Graph;
+
 
 // Container layout storing computed shortest-path route arrays
 typedef struct {

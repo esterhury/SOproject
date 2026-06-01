@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <math.h>
 #include <string.h>
+#include  <sys/mman.h>
+#include <semaphore.h>
 
 // Create a new graph with a given number of vertices
 Graph* createGraph(int vertices){
@@ -18,6 +20,21 @@ Graph* createGraph(int vertices){
         graph->adjLists[i] = NULL;
     }
     graph->positions = (Vector2*)malloc(vertices * sizeof(Vector2));
+    // Allocate a contiguous array of semaphores within a shared memory block for cross-process synchronization
+    graph->semaphores = (sem_t*)mmap(NULL, vertices * sizeof(sem_t),
+                                     PROT_READ | PROT_WRITE,
+                                     MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (graph->semaphores == MAP_FAILED) {// Validate that the shared memory allocation for the semaphore array succeeded completely
+        perror("Error: mmap failed for semaphores");
+        exit(1);
+     }
+    // Initialize each vertex semaphore to be shared among processes and set its initial capacity to 1
+    for (int i = 0; i < vertices; i++) {
+        if (sem_init(&(graph->semaphores[i]), 1, 1) != 0) {
+            perror("Error: sem_init failed");
+            exit(1);
+        }
+    }
     return graph;
 }
 
@@ -124,6 +141,14 @@ Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsAr
 //Clean up memory to prevent leaks
 void freeGraph(Graph* graph) {
     if (!graph) return;
+
+    if (graph->semaphores != NULL) {
+        for (int i = 0; i < graph->numVertices; i++) {
+            sem_destroy(&(graph->semaphores[i]));
+        }
+        munmap(graph->semaphores, graph->numVertices * sizeof(sem_t));
+    }
+
     for (int i = 0; i < graph->numVertices; i++) {
         Node* temp = graph->adjLists[i];
         while (temp) {
@@ -422,6 +447,9 @@ void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int ds
             passenger->movingEntity.currentPos = (Vector2){ 0.0f, 0.0f };
         }
 
+        // Lock the very first node of the path so no other vehicle can spawn or sit on it simultaneously
+        sem_wait(&(graph->semaphores[firstNode]));
+
         passenger->movingEntity.currentPathIndex = 0;
         passenger->movingEntity.frameCounter = 0;
         passenger->movingEntity.currentStep = 0;
@@ -482,10 +510,20 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
                 p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
                 p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
             } else {
-                p->movingEntity.currentPos = targetPos;
-                p->movingEntity.currentPathIndex++;
+                // Attempt to acquire the next intersection semaphore safely without locking the main rendering thread
+                if (sem_trywait(&(graph->semaphores[nextNode])) == 0) {
+                    // Release the previously occupied graph vertex intersection to unlock it for waiting vehicles
+                    sem_post(&(graph->semaphores[currNode]));
+
+                    // Advance the passenger vehicle coordinates and increment its internal path timeline tracking index
+                    p->movingEntity.currentPos = targetPos;
+                    p->movingEntity.currentPathIndex++;
+                }
             }
         } else {
+            // Free the final destination node semaphore when the passenger permanently finishes its journey
+            int finalNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
+            sem_post(&(graph->semaphores[finalNode]));
             p->simulationFinished = true;
         }
     }
