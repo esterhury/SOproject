@@ -1,23 +1,22 @@
-# Compiler and Flags Configuration
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c11
-
-# System-wide dynamic library linking mapping
 LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 
-# Output binary configuration execution parameters
-EXEC_SIM = sim
+EXEC_SIM4 = sim4
+EXEC_SIM5 = sim5
 EXEC_DIJKSTRA = dijkstra
 
-# Default Target Deployment
 all: milestone4
 
-# Milestone 4 DevOps Integration Build Rule
 milestone4: main.c graph.c
-	$(CC) $(CFLAGS) -o $(EXEC_SIM) main.c graph.c $(LIBS)
+	$(CC) $(CFLAGS) -o $(EXEC_SIM4) main.c graph.c $(LIBS)
 
-# Housekeeping garbage cleanup rule
+milestone5: main.c graph.c
+	$(CC) $(CFLAGS) -o $(EXEC_SIM5) main.c graph.c $(LIBS)
+
 clean:
-	rm -f $(EXEC_DIJKSTRA) $(EXEC_SIM) *.o
+	rm -f $(EXEC_DIJKSTRA) $(EXEC_SIM4) $(EXEC_SIM5) *.o
 
-.PHONY: all clean milestone4
+.PHONY: all clean milestone4 milestone5
+milestone5: main.c graph.c
+	$(CC) $(CFLAGS) -o sim5 main.c graph.c $(LIBS)

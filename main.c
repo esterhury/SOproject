@@ -1,5 +1,4 @@
 #include <signal.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "raylib.h"
@@ -8,7 +7,6 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <signal.h>
 
 // Global array for real OS child processes mapping
 pid_t global_pids[MAX_PASSENGERS] = {0};
@@ -44,8 +42,6 @@ void DrawCar(Vector2 position, float rotation, Color color) {
     DrawRectanglePro(rec, origin, rotation, color);
 
     // --- FIXED: MOVED WINDOW TO THE OPPOSITE SIDE TO FIX REVERSE DRIVING ---
-    // Instead of adding angles, we physically moved the front window to the leading edge (+width/4)
-    // and updated the window origin offset so it always faces FORWARD along the velocity vector.
     Rectangle window = { position.x, position.y, width / 4, height - 6 };
     Vector2 windowOrigin = { width / 4, (height - 6) / 2 };
     DrawRectanglePro(window, windowOrigin, rotation, SKYBLUE);
@@ -136,17 +132,13 @@ int main() {
         if (CheckCollisionPointRec(mousePoint, playBtn) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
             if (allFinished) {
                 printf("[PARENT] Restarting simulation. Re-spawning child processes...\n");
-
                 for (int i = 0; i < total_passengers; i++) {
                     waitpid(global_pids[i], NULL, WNOHANG);
                 }
-
                 createTravelerProcesses(total_passengers, global_pids);
-
                 for (int i = 0; i < total_passengers; i++) {
                     passengers[i].id = global_pids[i];
                     passengers[i].simulationFinished = false;
-
                     calculatePassengerRoute(graph, &passengers[i],
                                             i == 0 ? s0 : i == 1 ? s1 : s2,
                                             i == 0 ? d0 : i == 1 ? d1 : d2);
@@ -175,7 +167,6 @@ int main() {
             for (int i = 0; i < total_passengers; i++) {
                 if (!passengers[i].simulationFinished && passengers[i].shortestPath.active) {
                     int idx = passengers[i].movingEntity.currentPathIndex;
-
                     if (!passengers[i].movingEntity.isMoving && idx >= passengers[i].shortestPath.count - 1) {
                         passengers[i].simulationFinished = true;
                         kill(passengers[i].id, SIGKILL);
@@ -200,7 +191,6 @@ int main() {
         for (int i = 0; i < total_passengers; i++) {
             if (passengers[i].shortestPath.active && !passengers[i].simulationFinished) {
                 Color pathColor = (i == 0) ? MAROON : (i == 1) ? DARKBLUE : PURPLE;
-
                 // Highlight the edges for this passenger's specific Dijkstra layout
                 for (int k = 0; k < passengers[i].shortestPath.count - 1; k++) {
                     int u = passengers[i].shortestPath.nodes[k];
@@ -215,7 +205,6 @@ int main() {
             if (passengers[i].shortestPath.active && !passengers[i].simulationFinished) {
                 Color carColor = (i == 0) ? MAROON : (i == 1) ? DARKBLUE : PURPLE;
                 DrawCar(passengers[i].movingEntity.currentPos, passengers[i].carRotation, carColor);
-
                 DrawText(TextFormat("PID: %d", passengers[i].id),
                          passengers[i].movingEntity.currentPos.x - 20,
                          passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
@@ -224,17 +213,14 @@ int main() {
 
         DrawRectangleRec(playBtn, isRunning ? LIME : GREEN);
         DrawText(allFinished ? "RESTART" : "PLAY", playBtn.x + (allFinished ? 15 : 35), playBtn.y + 10, 20, BLACK);
-
         DrawRectangleRec(stopBtn, RED);
         DrawText("STOP", stopBtn.x + 35, stopBtn.y + 10, 20, WHITE);
-
         DrawText("SYSTEM: MULTI-AGENT TRACKING ACTIVE", 15, 15, 20, DARKBLUE);
         if (allFinished) {
             DrawText("STATUS: ALL AGENTS ARRIVED (PRESS RESTART)", 15, 40, 18, GOLD);
         } else {
             DrawText(isRunning ? "STATUS: RUNNING" : "STATUS: PAUSED", 15, 40, 18, isRunning ? LIME : DARKGRAY);
         }
-
         EndDrawing();
     }
 
@@ -254,16 +240,15 @@ int main() {
     printf("[PARENT] All child layers cleanly closed. Execution finished.\n");
     return 0;
 }
-// ===================================================
 
 // ============================================================================
 // MEMBER 1 - OS BACKEND: MILESTONE 5 ADVANCED IPC PIPES IMPLEMENTATION
 // ============================================================================
 
 // Global matrix tracking descriptor pairs for multi-agent process pipelines
-int agent_pipes[MAX_PASSENGERS][2]; 
+int agent_pipes[MAX_PASSENGERS][2];
 
-/* * Member 1 Core OS Infrastructure: Initializes dedicated UNIX pipe clusters
+/* Member 1 Core OS Infrastructure: Initializes dedicated UNIX pipe clusters
  * to stream dynamic coordinates across child isolation environments.
  */
 void initializeMilestone5IPC(int passengerCount) {
@@ -277,7 +262,7 @@ void initializeMilestone5IPC(int passengerCount) {
     printf("[OS BACKEND] Successfully established %d standalone dynamic pipeline layers.\n", passengerCount);
 }
 
-/* * Member 1 Process Logic: Executed by child tasks to stream execution contexts
+/* Member 1 Process Logic: Executed by child tasks to stream execution contexts
  * directly into the synchronized father descriptor queues via pipeline registers.
  */
 void streamAgentStatusToParent(int agentIndex, int currentPathIndex, bool isWaiting) {
@@ -285,7 +270,7 @@ void streamAgentStatusToParent(int agentIndex, int currentPathIndex, bool isWait
     packetPayload[0] = agentIndex;
     packetPayload[1] = currentPathIndex;
     packetPayload[2] = isWaiting ? 1 : 0;
-    
+
     // Non-blocking asynchronous write operation to stream status data back to parent
     write(agent_pipes[agentIndex][1], packetPayload, sizeof(packetPayload));
 }

@@ -12,3 +12,8 @@ To build and execute the integrated multi-process layout, use the following comm
 ## Workspace Cleanup
 To flush out binary artifacts and clean the compilation environment, execute:
 `make clean`
+
+### Milestone 5 - OS Backend & IPC Implementation:
+- Implemented Inter-Process Communication (IPC) using UNIX pipes.
+- Enabled real-time agent status streaming from child processes to the parent process.
+- Ensured process synchronization and safe data exchange for multi-agent tracking.
