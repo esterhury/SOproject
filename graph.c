@@ -453,7 +453,7 @@ void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int ds
         passenger->movingEntity.currentPathIndex = 0;
         passenger->movingEntity.frameCounter = 0;
         passenger->movingEntity.currentStep = 0;
-        passenger->movingEntity.isWaiting = true;
+        passenger->movingEntity.isWaiting = false;
     } else {
         passenger->simulationFinished = true; // Mark as finished if no valid path exists
     }
@@ -507,6 +507,8 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
             p->carRotation = (atan2f(dy, dx) * (180.0f / PI)) + 180.0f;
 
             if (distance > dynamicSpeed) {
+                // The car is actively driving on the road, so it is NOT waiting
+                p->movingEntity.isWaiting = false;
                 p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
                 p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
             } else {
@@ -518,6 +520,9 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
                     // Advance the passenger vehicle coordinates and increment its internal path timeline tracking index
                     p->movingEntity.currentPos = targetPos;
                     p->movingEntity.currentPathIndex++;
+                    p->movingEntity.isWaiting = false;
+                } else {
+                    p->movingEntity.isWaiting = true;
                 }
             }
         } else {

@@ -32,14 +32,24 @@ void createTravelerProcesses(int numTravelers, pid_t* pids) {
 }
 
 // Function to draw a car with rotation using standard C math capabilities (No raymath.h dependency)
-void DrawCar(Vector2 position, float rotation, Color color) {
+void DrawCar(Vector2 position, float rotation, Color color, bool isWaiting) {
     float width = 40.0f;
     float height = 20.0f;
+
+    Color colorToDraw = color;
+
+    if (isWaiting) {
+        if ((int)(GetTime() * 2) % 2 == 0) {
+            colorToDraw = ORANGE;
+        } else {
+            colorToDraw = YELLOW;
+        }
+    }
 
     // Standard core drawing using pure velocity angle rotation
     Rectangle rec = { position.x, position.y, width, height };
     Vector2 origin = { width / 2, height / 2 };
-    DrawRectanglePro(rec, origin, rotation, color);
+    DrawRectanglePro(rec, origin, rotation, colorToDraw);
 
     // --- FIXED: MOVED WINDOW TO THE OPPOSITE SIDE TO FIX REVERSE DRIVING ---
     Rectangle window = { position.x, position.y, width / 4, height - 6 };
@@ -62,6 +72,18 @@ void DrawCar(Vector2 position, float rotation, Color color) {
         float rotatedY = wheelOffsets[i].x * sinA + wheelOffsets[i].y * cosA;
         Vector2 finalWheelPos = { position.x + rotatedX, position.y + rotatedY };
         DrawCircleV(finalWheelPos, 4, BLACK);
+    }
+
+    if (isWaiting) {
+        int fontSize = 11;
+        const char* waitText = "WAITING FOR JUNCTION";
+        int textWidth = MeasureText(waitText, fontSize);
+
+        DrawText(waitText,
+                 position.x - (textWidth / 2),
+                 position.y - 35,
+                 fontSize,
+                 ORANGE);
     }
 }
 
@@ -204,10 +226,15 @@ int main() {
         for (int i = 0; i < total_passengers; i++) {
             if (passengers[i].shortestPath.active && !passengers[i].simulationFinished) {
                 Color carColor = (i == 0) ? MAROON : (i == 1) ? DARKBLUE : PURPLE;
-                DrawCar(passengers[i].movingEntity.currentPos, passengers[i].carRotation, carColor);
+
+                bool isCarWaiting = passengers[i].movingEntity.isWaiting;
+
+                DrawCar(passengers[i].movingEntity.currentPos, passengers[i].carRotation, carColor, isCarWaiting);
+
+                int pidYOffset = isCarWaiting ? -47 : -25;
                 DrawText(TextFormat("PID: %d", passengers[i].id),
                          passengers[i].movingEntity.currentPos.x - 20,
-                         passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
+                         passengers[i].movingEntity.currentPos.y + pidYOffset, 12, DARKGRAY);
             }
         }
 
