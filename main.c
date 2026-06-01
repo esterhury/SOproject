@@ -254,3 +254,38 @@ int main() {
     printf("[PARENT] All child layers cleanly closed. Execution finished.\n");
     return 0;
 }
+// ===================================================
+
+// ============================================================================
+// MEMBER 1 - OS BACKEND: MILESTONE 5 ADVANCED IPC PIPES IMPLEMENTATION
+// ============================================================================
+
+// Global matrix tracking descriptor pairs for multi-agent process pipelines
+int agent_pipes[MAX_PASSENGERS][2]; 
+
+/* * Member 1 Core OS Infrastructure: Initializes dedicated UNIX pipe clusters
+ * to stream dynamic coordinates across child isolation environments.
+ */
+void initializeMilestone5IPC(int passengerCount) {
+    printf("[OS BACKEND] Member 1 allocating structural IPC memory channels...\n");
+    for (int i = 0; i < passengerCount; i++) {
+        if (pipe(agent_pipes[i]) < 0) {
+            perror("OS Subsystem Error: Shared IPC pipeline mapping registration failed");
+            exit(1);
+        }
+    }
+    printf("[OS BACKEND] Successfully established %d standalone dynamic pipeline layers.\n", passengerCount);
+}
+
+/* * Member 1 Process Logic: Executed by child tasks to stream execution contexts
+ * directly into the synchronized father descriptor queues via pipeline registers.
+ */
+void streamAgentStatusToParent(int agentIndex, int currentPathIndex, bool isWaiting) {
+    int packetPayload[3];
+    packetPayload[0] = agentIndex;
+    packetPayload[1] = currentPathIndex;
+    packetPayload[2] = isWaiting ? 1 : 0;
+    
+    // Non-blocking asynchronous write operation to stream status data back to parent
+    write(agent_pipes[agentIndex][1], packetPayload, sizeof(packetPayload));
+}
