@@ -13,6 +13,7 @@
 #include "raylib.h"
 #include "graph.h"
 
+// Define the structure for IPC messages used for communication between child processes and the parent
 typedef struct {
     int agentIndex;
     int currentNode;
@@ -21,13 +22,41 @@ typedef struct {
     bool isFinished;
 } IPCMessage;
 
+// Global variables for process management and shared simulation state
 pid_t global_pids[MAX_PASSENGERS] = {0};
 int agent_pipes[MAX_PASSENGERS][2];
 Passenger shared_passengers[MAX_PASSENGERS];
 int total_passengers = 2; // Matched to 2 travelers from the professor's sample
 
+// Member 1 - Milestone 6: Global graph pointer needed for the signal handler to free resources
+Graph* global_graph = NULL;
 Vector2 visual_targets[MAX_PASSENGERS];
 float animation_speed = 0.04f;
+
+// Member 1 - Milestone 6: Signal handler for graceful simulation shutdown
+// This function catches interrupt signals (like Ctrl+C) to prevent zombie processes
+void handle_sigint(int sig) {
+    printf("\n[Signal %d caught] Gracefully shutting down simulation...\n", sig);
+
+    // 1. Terminate all child processes politely using SIGTERM to allow cleanup
+    for (int i = 0; i < total_passengers; i++) {
+        if (global_pids[i] > 0) {
+            kill(global_pids[i], SIGTERM);
+            waitpid(global_pids[i], NULL, 0); // Reaping processes to prevent zombies
+        }
+        // 2. Close communication pipes to release file descriptors
+        close(agent_pipes[i][0]);
+        close(agent_pipes[i][1]);
+    }
+
+    // 3. Clean up the shared graph resources and memory safely
+    if (global_graph != NULL) {
+        freeGraph(global_graph);
+    }
+
+    printf("Cleanup complete. Exiting.\n");
+    exit(0);
+}
 
 void DrawCar(Vector2 position, float rotation, Color color, bool isWaiting) {
     float width = 40.0f;
@@ -92,7 +121,6 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
         .isFinished = (myPath.count == 1)
     };
 
-    // Captured return value to strictly satisfy compiler restrictions
     int unused_ret;
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
@@ -119,7 +147,6 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
     }
 
-    // Explicitly use the variable to suppress any set-but-unused warning flags
     (void)unused_ret;
 
     while (1) {
@@ -157,15 +184,18 @@ int main() {
     int* destsArray = NULL;
     int numTravelers = 0;
 
-    Graph* graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &sourcesArray, &destsArray, &numTravelers);
-    if (graph == NULL) {
+    // Load initial simulation configuration
+    global_graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &sourcesArray, &destsArray, &numTravelers);
+    if (global_graph == NULL) {
         printf("Error: Graph context could not be loaded safely.\n");
         return 1;
     }
 
-    computePosition(graph);
+    // Member 1 - Milestone 6: Register signal handler for Ctrl+C (SIGINT)
+    signal(SIGINT, handle_sigint);
 
-    // Dynamic scale adaptation based on file travelers count
+    computePosition(global_graph);
+
     if (numTravelers > 0 && numTravelers <= MAX_PASSENGERS) {
         total_passengers = numTravelers;
     }
@@ -188,8 +218,8 @@ int main() {
     for (int i = 0; i < total_passengers; i++) {
         shared_passengers[i].id = 1000 + i;
         shared_passengers[i].shortestPath.active = true;
-        shared_passengers[i].movingEntity.currentPos = graph->positions[sources[i]];
-        visual_targets[i] = graph->positions[sources[i]];
+        shared_passengers[i].movingEntity.currentPos = global_graph->positions[sources[i]];
+        visual_targets[i] = global_graph->positions[sources[i]];
     }
 
     bool isRunning = false;
@@ -199,7 +229,6 @@ int main() {
     InitWindow(800, 600, "Multi-Agent Graph Simulation - Milestone 5 Strict Match");
     SetTargetFPS(60);
 
-    // Track which processes have logged their finished states
     bool process_logged_finished[MAX_PASSENGERS] = {false};
 
     while (!WindowShouldClose()) {
@@ -220,13 +249,13 @@ int main() {
                         waitpid(global_pids[i], NULL, WNOHANG);
                         shared_passengers[i].simulationFinished = false;
                         shared_passengers[i].movingEntity.isWaiting = false;
-                        shared_passengers[i].movingEntity.currentPos = graph->positions[sources[i]];
-                        visual_targets[i] = graph->positions[sources[i]];
+                        shared_passengers[i].movingEntity.currentPos = global_graph->positions[sources[i]];
+                        visual_targets[i] = global_graph->positions[sources[i]];
                         process_logged_finished[i] = false;
                     }
-                    createTravelerProcesses(graph, total_passengers, sources, dests);
+                    createTravelerProcesses(global_graph, total_passengers, sources, dests);
                 } else if (global_pids[0] == 0) {
-                    createTravelerProcesses(graph, total_passengers, sources, dests);
+                    createTravelerProcesses(global_graph, total_passengers, sources, dests);
                 }
                 isRunning = true;
             }
@@ -246,10 +275,10 @@ int main() {
                     shared_passengers[i].id = global_pids[i];
                     shared_passengers[i].movingEntity.isWaiting = incomingMsg.isWaiting;
 
-                    Vector2 currentJunctionPos = graph->positions[incomingMsg.currentNode];
+                    Vector2 currentJunctionPos = global_graph->positions[incomingMsg.currentNode];
 
                     if (incomingMsg.isWaiting) {
-                        Vector2 targetJunctionPos = graph->positions[incomingMsg.nextNode];
+                        Vector2 targetJunctionPos = global_graph->positions[incomingMsg.nextNode];
                         float dx = targetJunctionPos.x - currentJunctionPos.x;
                         float dy = targetJunctionPos.y - currentJunctionPos.y;
                         float len = sqrtf(dx*dx + dy*dy);
@@ -264,7 +293,7 @@ int main() {
                             printf("[PID=%d] arrived at node %d | next node: %d\n", global_pids[i], incomingMsg.currentNode, incomingMsg.nextNode);
                         } else {
                             printf("[PID=%d] arrived at node %d | DESTINATION\n", global_pids[i], incomingMsg.currentNode);
-                            shared_passengers[i].simulationFinished = true; // Safe arrival checkpoint mapping
+                            shared_passengers[i].simulationFinished = true;
                         }
                         fflush(stdout);
                     }
@@ -280,65 +309,48 @@ int main() {
             }
 
             // --- STRICT REAPING SEQUENCE ORDERING ---
-            // Prints the exact cascading 'finished' messages only after arrival criteria are met
             if (allFinished) {
                 for (int i = 0; i < total_passengers; i++) {
                     if (!process_logged_finished[i]) {
                         printf("[PID=%d] finished\n", global_pids[i]);
                         fflush(stdout);
-                        kill(global_pids[i], SIGKILL);
+                        // Member 1 - Milestone 6: Replace SIGKILL with SIGTERM for graceful exit
+                        kill(global_pids[i], SIGTERM);
+                        waitpid(global_pids[i], NULL, 0);
                         process_logged_finished[i] = true;
                     }
                 }
             }
         }
 
-        // Graphics Rendering Stage
         BeginDrawing();
         ClearBackground(RAYWHITE);
-
-        Path emptyPath = { .active = false };
-        drawGraph(graph, emptyPath);
+        drawGraph(global_graph, (Path){.active=false});
 
         for (int i = 0; i < total_passengers; i++) {
             if (!process_logged_finished[i]) {
-                Color carColor = (i == 0) ? MAROON : (i == 1) ? DARKBLUE : PURPLE;
-                DrawCar(shared_passengers[i].movingEntity.currentPos, shared_passengers[i].carRotation, carColor, shared_passengers[i].movingEntity.isWaiting);
-
-                int pidYOffset = shared_passengers[i].movingEntity.isWaiting ? -47 : -25;
+                DrawCar(shared_passengers[i].movingEntity.currentPos, shared_passengers[i].carRotation, MAROON, shared_passengers[i].movingEntity.isWaiting);
                 DrawText(TextFormat("PID: %d", shared_passengers[i].id),
                          shared_passengers[i].movingEntity.currentPos.x - 20,
-                         shared_passengers[i].movingEntity.currentPos.y + pidYOffset, 12, DARKGRAY);
+                         shared_passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
             }
         }
 
         DrawRectangleRec(playBtn, isRunning ? LIME : GREEN);
-        DrawText(allFinished ? "RESTART" : "PLAY", playBtn.x + (allFinished ? 15 : 35), playBtn.y + 10, 20, BLACK);
+        DrawText(allFinished ? "RESTART" : "PLAY", playBtn.x + 15, playBtn.y + 10, 20, BLACK);
         DrawRectangleRec(stopBtn, RED);
         DrawText("STOP", stopBtn.x + 35, stopBtn.y + 10, 20, WHITE);
-
-        DrawText("SYSTEM: MULTI-AGENT IPC LOGS ACTIVE", 15, 15, 20, DARKBLUE);
-        if (allFinished) {
-            DrawText("STATUS: ALL AGENTS ARRIVED (RELEASED)", 15, 40, 18, GOLD);
-        } else {
-            DrawText(isRunning ? "STATUS: RUNNING" : "STATUS: PAUSED", 15, 40, 18, isRunning ? LIME : DARKGRAY);
-        }
 
         EndDrawing();
     }
 
     CloseWindow();
-    for (int i = 0; i < total_passengers; i++) {
-        if (global_pids[i] > 0) {
-            kill(global_pids[i], SIGKILL);
-            waitpid(global_pids[i], NULL, 0);
-            close(agent_pipes[i][0]);
-        }
-    }
+    // Final cleanup call
+    handle_sigint(0);
 
     if (sourcesArray) free(sourcesArray);
     if (destsArray) free(destsArray);
-    freeGraph(graph);
+    freeGraph(global_graph);
 
     return 0;
 }
