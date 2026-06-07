@@ -111,6 +111,7 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
     if (!myPath.active || myPath.count <= 0) exit(1);
 
+    // Acquire the initial semaphore lock for the starting node
     sem_wait(&(graph->semaphores[myPath.nodes[0]]));
 
     IPCMessage msg = {
@@ -124,31 +125,42 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
     int unused_ret;
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
+    // Traverse through the computed shortest path vertices
     for (int i = 0; i < myPath.count - 1; i++) {
         int curr = myPath.nodes[i];
         int next = myPath.nodes[i + 1];
 
+        // Simulate transit time traveling along the edge connecting the nodes
         for (int step = 0; step < 40; step++) {
             usleep(25000);
         }
 
+        // Notify parent process that the agent has arrived at the junction entrance and is waiting
         msg.currentNode = curr;
         msg.nextNode = next;
         msg.isWaiting = true;
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
+        // Enforce Mutual Exclusion: Block here if another agent occupies the target junction
         sem_wait(&(graph->semaphores[next]));
-        sem_post(&(graph->semaphores[curr]));
 
+        // Successfully entered the junction: Update status flags and alert the parent process
         msg.currentNode = next;
         msg.nextNode = (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1;
         msg.isWaiting = false;
         if (i + 1 == myPath.count - 1) msg.isFinished = true;
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
+
+        // Critical Section: Enforce a strict 1-second resource hold time inside the locked node
+        sleep(1);
+
+        // Release the previous junction semaphore lock after the holding duration completes
+        sem_post(&(graph->semaphores[curr]));
     }
 
     (void)unused_ret;
 
+    // Maintain the child process alive to preserve structural state until simulation teardown
     while (1) {
         sleep(1);
     }
