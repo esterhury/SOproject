@@ -7,6 +7,8 @@
 #include <stdbool.h>
 #include <math.h>
 #include <string.h>
+#include  <sys/mman.h>
+#include <semaphore.h>
 
 // Create a new graph with a given number of vertices
 Graph* createGraph(int vertices){
@@ -18,6 +20,21 @@ Graph* createGraph(int vertices){
         graph->adjLists[i] = NULL;
     }
     graph->positions = (Vector2*)malloc(vertices * sizeof(Vector2));
+    // Allocate a contiguous array of semaphores within a shared memory block for cross-process synchronization
+    graph->semaphores = (sem_t*)mmap(NULL, vertices * sizeof(sem_t),
+                                     PROT_READ | PROT_WRITE,
+                                     MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (graph->semaphores == MAP_FAILED) {// Validate that the shared memory allocation for the semaphore array succeeded completely
+        perror("Error: mmap failed for semaphores");
+        exit(1);
+     }
+    // Initialize each vertex semaphore to be shared among processes and set its initial capacity to 1
+    for (int i = 0; i < vertices; i++) {
+        if (sem_init(&(graph->semaphores[i]), 1, 1) != 0) {
+            perror("Error: sem_init failed");
+            exit(1);
+        }
+    }
     return graph;
 }
 
@@ -124,6 +141,14 @@ Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsAr
 //Clean up memory to prevent leaks
 void freeGraph(Graph* graph) {
     if (!graph) return;
+
+    if (graph->semaphores != NULL) {
+        for (int i = 0; i < graph->numVertices; i++) {
+            sem_destroy(&(graph->semaphores[i]));
+        }
+        munmap(graph->semaphores, graph->numVertices * sizeof(sem_t));
+    }
+
     for (int i = 0; i < graph->numVertices; i++) {
         Node* temp = graph->adjLists[i];
         while (temp) {
@@ -376,10 +401,22 @@ void updateEntity(Entity* entity, Graph* graph, Path* path) {
 void drawEntity(Entity* entity) {
     if (!entity->isMoving && entity->currentPathIndex == 0) return;
 
-    DrawCircleV(entity->currentPos, 12, RED);
-    DrawCircleLinesV(entity->currentPos, 12, MAROON);
+    Color bodyColor = RED;
+    Color lineColor = MAROON;
+    const char* labelText = "BUS";
+    Color textColor = DARKGRAY;
 
-    DrawText("BUS", entity->currentPos.x - 15, entity->currentPos.y - 25, 12, DARKGRAY);
+    if (entity->isWaiting) {
+        bodyColor = ORANGE;
+        lineColor = ORANGE;
+        labelText = "Waiting...";
+        textColor = RED;
+    }
+
+    DrawCircleV(entity->currentPos, 12, bodyColor);
+    DrawCircleLinesV(entity->currentPos, 12, lineColor);
+
+    DrawText(labelText, entity->currentPos.x - 15, entity->currentPos.y - 25, 12, textColor);
 }
 
 /* Dynamic path calculation for a single passenger using Dijkstra's output */
@@ -422,10 +459,13 @@ void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int ds
             passenger->movingEntity.currentPos = (Vector2){ 0.0f, 0.0f };
         }
 
+        // Lock the very first node of the path so no other vehicle can spawn or sit on it simultaneously
+        sem_wait(&(graph->semaphores[firstNode]));
+
         passenger->movingEntity.currentPathIndex = 0;
         passenger->movingEntity.frameCounter = 0;
         passenger->movingEntity.currentStep = 0;
-        passenger->movingEntity.isWaiting = true;
+        passenger->movingEntity.isWaiting = false;
     } else {
         passenger->simulationFinished = true; // Mark as finished if no valid path exists
     }
@@ -479,14 +519,49 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
             p->carRotation = (atan2f(dy, dx) * (180.0f / PI)) + 180.0f;
 
             if (distance > dynamicSpeed) {
+                // The car is actively driving on the road, so it is NOT waiting
+                p->movingEntity.isWaiting = false;
                 p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
                 p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
             } else {
-                p->movingEntity.currentPos = targetPos;
-                p->movingEntity.currentPathIndex++;
+                // Check if the vehicle is currently inside the node executing its 1-second delay
+                if (p->movingEntity.isWaiting && p->movingEntity.frameCounter > 0) {
+                    p->movingEntity.frameCounter++;
+                    if (p->movingEntity.frameCounter >= 60) {
+                        // 1 second passed! Release the node and advance to the next edge segment
+                        sem_post(&(graph->semaphores[currNode]));
+                        p->movingEntity.isWaiting = false;
+                        p->movingEntity.frameCounter = 0;
+                        p->movingEntity.currentStep = 0;
+                        p->movingEntity.currentPathIndex++;
+                    }
+                }
+                // Vehicle just arrived at the end of the edge and wants to enter the next node intersection
+                else {
+                    // Attempt to acquire the next intersection semaphore safely without locking the main rendering thread
+                    if (sem_trywait(&(graph->semaphores[nextNode])) == 0) {
+                        // Successfully locked the node! Move into it and trigger the 1-second wait timer
+                        p->movingEntity.currentPos = targetPos;
+                        p->movingEntity.isWaiting = true;
+                        p->movingEntity.frameCounter = 1; // Mark frameCounter as 1 to distinguish from a blocked state
+                    } else {
+                        // Node is occupied! Keep trying every frame — reset isWaiting and frameCounter
+                        // so the sem_trywait branch stays reachable on the next update cycle.
+                        p->movingEntity.isWaiting = false;
+                        p->movingEntity.frameCounter = 0;
+                    }
+                }
             }
         } else {
+            // Free the final destination node semaphore when the passenger permanently finishes its journey
+            int finalNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
+            sem_post(&(graph->semaphores[finalNode]));
             p->simulationFinished = true;
+
+            // --- FIX TO PREVENT DEADLOCK: Reset entity status so it doesn't block behind-vehicles ---
+            p->movingEntity.isMoving = false;
+            p->movingEntity.isWaiting = false;
+            p->movingEntity.frameCounter = 0;
         }
     }
 }
