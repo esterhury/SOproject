@@ -125,6 +125,12 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
     int unused_ret;
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
+ milestone6-shira
+    // Saved last node index to unlock it after loop finishes
+    int lastJunctionUnlocked = myPath.nodes[0];
+
+
+ master
     // Traverse through the computed shortest path vertices
     for (int i = 0; i < myPath.count - 1; i++) {
         int curr = myPath.nodes[i];
@@ -143,6 +149,10 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
         // Enforce Mutual Exclusion: Block here if another agent occupies the target junction
         sem_wait(&(graph->semaphores[next]));
+ milestone6-shira
+        lastJunctionUnlocked = next; // Update tracked locked node
+
+ master
 
         // Successfully entered the junction: Update status flags and alert the parent process
         msg.currentNode = next;
@@ -158,6 +168,12 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
         sem_post(&(graph->semaphores[curr]));
     }
 
+ milestone6-shira
+    // Safely release the very final destination node semaphore so subsequent cars can enter
+    sem_post(&(graph->semaphores[lastJunctionUnlocked]));
+
+
+ master
     (void)unused_ret;
 
     // Maintain the child process alive to preserve structural state until simulation teardown

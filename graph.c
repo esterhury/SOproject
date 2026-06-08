@@ -401,10 +401,22 @@ void updateEntity(Entity* entity, Graph* graph, Path* path) {
 void drawEntity(Entity* entity) {
     if (!entity->isMoving && entity->currentPathIndex == 0) return;
 
-    DrawCircleV(entity->currentPos, 12, RED);
-    DrawCircleLinesV(entity->currentPos, 12, MAROON);
+    Color bodyColor = RED;
+    Color lineColor = MAROON;
+    const char* labelText = "BUS";
+    Color textColor = DARKGRAY;
 
-    DrawText("BUS", entity->currentPos.x - 15, entity->currentPos.y - 25, 12, DARKGRAY);
+    if (entity->isWaiting) {
+        bodyColor = ORANGE;
+        lineColor = ORANGE;
+        labelText = "Waiting...";
+        textColor = RED;
+    }
+
+    DrawCircleV(entity->currentPos, 12, bodyColor);
+    DrawCircleLinesV(entity->currentPos, 12, lineColor);
+
+    DrawText(labelText, entity->currentPos.x - 15, entity->currentPos.y - 25, 12, textColor);
 }
 
 /* Dynamic path calculation for a single passenger using Dijkstra's output */
@@ -512,6 +524,34 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
                 p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
                 p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
             } else {
+ milestone6-shira
+                // Check if the vehicle is currently inside the node executing its 1-second delay
+                if (p->movingEntity.isWaiting && p->movingEntity.frameCounter > 0) {
+                    p->movingEntity.frameCounter++;
+                    if (p->movingEntity.frameCounter >= 60) {
+                        // 1 second passed! Release the node and advance to the next edge segment
+                        sem_post(&(graph->semaphores[currNode]));
+                        p->movingEntity.isWaiting = false;
+                        p->movingEntity.frameCounter = 0;
+                        p->movingEntity.currentStep = 0;
+                        p->movingEntity.currentPathIndex++;
+                    }
+                }
+                // Vehicle just arrived at the end of the edge and wants to enter the next node intersection
+                else {
+                    // Attempt to acquire the next intersection semaphore safely without locking the main rendering thread
+                    if (sem_trywait(&(graph->semaphores[nextNode])) == 0) {
+                        // Successfully locked the node! Move into it and trigger the 1-second wait timer
+                        p->movingEntity.currentPos = targetPos;
+                        p->movingEntity.isWaiting = true;
+                        p->movingEntity.frameCounter = 1; // Mark frameCounter as 1 to distinguish from a blocked state
+                    } else {
+                        // Node is occupied! Keep trying every frame — reset isWaiting and frameCounter
+                        // so the sem_trywait branch stays reachable on the next update cycle.
+                        p->movingEntity.isWaiting = false;
+                        p->movingEntity.frameCounter = 0;
+                    }
+
                 // Attempt to acquire the next intersection semaphore safely without locking the main rendering thread
                 if (sem_trywait(&(graph->semaphores[nextNode])) == 0) {
                     // Release the previously occupied graph vertex intersection to unlock it for waiting vehicles
@@ -523,6 +563,7 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
                     p->movingEntity.isWaiting = false;
                 } else {
                     p->movingEntity.isWaiting = true;
+ master
                 }
             }
         } else {
@@ -530,6 +571,11 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
             int finalNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
             sem_post(&(graph->semaphores[finalNode]));
             p->simulationFinished = true;
+
+            // --- FIX TO PREVENT DEADLOCK: Reset entity status so it doesn't block behind-vehicles ---
+            p->movingEntity.isMoving = false;
+            p->movingEntity.isWaiting = false;
+            p->movingEntity.frameCounter = 0;
         }
     }
 }
