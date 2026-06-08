@@ -524,6 +524,7 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
                 p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
                 p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
             } else {
+ milestone6-shira
                 // Check if the vehicle is currently inside the node executing its 1-second delay
                 if (p->movingEntity.isWaiting && p->movingEntity.frameCounter > 0) {
                     p->movingEntity.frameCounter++;
@@ -550,6 +551,19 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
                         p->movingEntity.isWaiting = false;
                         p->movingEntity.frameCounter = 0;
                     }
+
+                // Attempt to acquire the next intersection semaphore safely without locking the main rendering thread
+                if (sem_trywait(&(graph->semaphores[nextNode])) == 0) {
+                    // Release the previously occupied graph vertex intersection to unlock it for waiting vehicles
+                    sem_post(&(graph->semaphores[currNode]));
+
+                    // Advance the passenger vehicle coordinates and increment its internal path timeline tracking index
+                    p->movingEntity.currentPos = targetPos;
+                    p->movingEntity.currentPathIndex++;
+                    p->movingEntity.isWaiting = false;
+                } else {
+                    p->movingEntity.isWaiting = true;
+ master
                 }
             }
         } else {

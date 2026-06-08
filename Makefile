@@ -1,22 +1,30 @@
+# Compiler and Flags
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c11
-LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
+CFLAGS = -Wall -Wextra -g -O2
+LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 $(shell pkg-config --libs raylib 2>/dev/null)
 
-EXEC_SIM4 = sim4
-EXEC_SIM5 = sim5
-EXEC_DIJKSTRA = dijkstra
+# Source Files
+SRCS = main.c graph.c
+OBJS = $(SRCS:.c=.o)
+TARGET = sim
 
-all: milestone4
+# Default Target
+all: milestone5
 
-milestone4: main.c graph.c
-	$(CC) $(CFLAGS) -o $(EXEC_SIM4) main.c graph.c $(LIBS)
+# Milestone 4 Target
+milestone4: clean $(OBJS)
+	$(CC) $(CFLAGS) $(OBJS) -o $(TARGET) $(LIBS)
 
-milestone5: main.c graph.c
-	$(CC) $(CFLAGS) -o $(EXEC_SIM5) main.c graph.c $(LIBS)
+# Milestone 5 Target
+milestone5: clean $(OBJS)
+	$(CC) $(CFLAGS) $(OBJS) -o $(TARGET) $(LIBS)
 
+# Object Files Compilation
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Cleanup Environment Target
 clean:
-	rm -f $(EXEC_DIJKSTRA) $(EXEC_SIM4) $(EXEC_SIM5) *.o
+	rm -f $(TARGET) *.o
 
-.PHONY: all clean milestone4 milestone5
-milestone5: main.c graph.c
-	$(CC) $(CFLAGS) -o sim5 main.c graph.c $(LIBS)
+.PHONY: all milestone4 milestone5 clean
