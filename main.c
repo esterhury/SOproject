@@ -26,7 +26,7 @@ typedef struct {
 pid_t global_pids[MAX_PASSENGERS] = {0};
 int agent_pipes[MAX_PASSENGERS][2];
 Passenger shared_passengers[MAX_PASSENGERS];
-int total_passengers = 2; // Matched to 2 travelers from the professor's sample
+int total_passengers = 3; // Matched to 3 travelers from the professor's sample
 
 // Member 1 - Milestone 6: Global graph pointer needed for the signal handler to free resources
 Graph* global_graph = NULL;
@@ -111,7 +111,7 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
     if (!myPath.active || myPath.count <= 0) exit(1);
 
-    // Acquire the initial semaphore lock for the starting node
+    // Lock the starting node
     sem_wait(&(graph->semaphores[myPath.nodes[0]]));
 
     IPCMessage msg = {
@@ -125,58 +125,44 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
     int unused_ret;
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
- milestone6-shira
-    // Saved last node index to unlock it after loop finishes
-    int lastJunctionUnlocked = myPath.nodes[0];
-
-
- master
-    // Traverse through the computed shortest path vertices
+    // Traverse the computed path
     for (int i = 0; i < myPath.count - 1; i++) {
         int curr = myPath.nodes[i];
         int next = myPath.nodes[i + 1];
 
-        // Simulate transit time traveling along the edge connecting the nodes
-        for (int step = 0; step < 40; step++) {
-            usleep(25000);
+        // Simulate transit time along the edge
+        for (int step = 0; step < 150; step++) {
+            usleep(30000);
         }
 
-        // Notify parent process that the agent has arrived at the junction entrance and is waiting
+        // Notify parent that the agent is waiting outside the next node
         msg.currentNode = curr;
         msg.nextNode = next;
         msg.isWaiting = true;
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
-        // Enforce Mutual Exclusion: Block here if another agent occupies the target junction
+        // Enforce Mutual Exclusion: Block if the next node is occupied
         sem_wait(&(graph->semaphores[next]));
- milestone6-shira
-        lastJunctionUnlocked = next; // Update tracked locked node
 
- master
+        // Successfully entered the next node: release the previous one
+        sem_post(&(graph->semaphores[curr]));
 
-        // Successfully entered the junction: Update status flags and alert the parent process
+        // Update status and notify parent
         msg.currentNode = next;
         msg.nextNode = (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1;
         msg.isWaiting = false;
         if (i + 1 == myPath.count - 1) msg.isFinished = true;
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
-        // Critical Section: Enforce a strict 1-second resource hold time inside the locked node
+        // Critical Section: Hold the node for exactly 1 second
         sleep(1);
-
-        // Release the previous junction semaphore lock after the holding duration completes
-        sem_post(&(graph->semaphores[curr]));
     }
 
- milestone6-shira
-    // Safely release the very final destination node semaphore so subsequent cars can enter
-    sem_post(&(graph->semaphores[lastJunctionUnlocked]));
-
-
- master
+    // Release the final destination node
+    sem_post(&(graph->semaphores[myPath.nodes[myPath.count - 1]]));
     (void)unused_ret;
 
-    // Maintain the child process alive to preserve structural state until simulation teardown
+    // Keep child alive until main simulation shutdown
     while (1) {
         sleep(1);
     }
@@ -213,8 +199,7 @@ int main() {
     int numTravelers = 0;
 
     // Load initial simulation configuration
-    global_graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &sourcesArray, &destsArray, &numTravelers);
-    if (global_graph == NULL) {
+        global_graph = loadGraphFromFile("input.txt", &sourcesArray, &destsArray, &numTravelers);    if (global_graph == NULL) {
         printf("Error: Graph context could not be loaded safely.\n");
         return 1;
     }

@@ -9,7 +9,7 @@ OBJS = $(SRCS:.c=.o)
 TARGET = sim
 
 # Default Target
-all: milestone5
+all: milestone6
 
 # Milestone 4 Target
 milestone4: clean $(OBJS)
@@ -17,6 +17,10 @@ milestone4: clean $(OBJS)
 
 # Milestone 5 Target
 milestone5: clean $(OBJS)
+	$(CC) $(CFLAGS) $(OBJS) -o $(TARGET) $(LIBS)
+
+# Milestone 6 Target
+milestone6: clean $(OBJS)
 	$(CC) $(CFLAGS) $(OBJS) -o $(TARGET) $(LIBS)
 
 # Object Files Compilation
@@ -27,4 +31,4 @@ milestone5: clean $(OBJS)
 clean:
 	rm -f $(TARGET) *.o
 
-.PHONY: all milestone4 milestone5 clean
+.PHONY: all milestone4 milestone5 milestone6 clean

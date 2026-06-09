@@ -519,52 +519,12 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
             p->carRotation = (atan2f(dy, dx) * (180.0f / PI)) + 180.0f;
 
             if (distance > dynamicSpeed) {
-                // The car is actively driving on the road, so it is NOT waiting
                 p->movingEntity.isWaiting = false;
                 p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
                 p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
             } else {
- milestone6-shira
-                // Check if the vehicle is currently inside the node executing its 1-second delay
-                if (p->movingEntity.isWaiting && p->movingEntity.frameCounter > 0) {
-                    p->movingEntity.frameCounter++;
-                    if (p->movingEntity.frameCounter >= 60) {
-                        // 1 second passed! Release the node and advance to the next edge segment
-                        sem_post(&(graph->semaphores[currNode]));
-                        p->movingEntity.isWaiting = false;
-                        p->movingEntity.frameCounter = 0;
-                        p->movingEntity.currentStep = 0;
-                        p->movingEntity.currentPathIndex++;
-                    }
-                }
-                // Vehicle just arrived at the end of the edge and wants to enter the next node intersection
-                else {
-                    // Attempt to acquire the next intersection semaphore safely without locking the main rendering thread
-                    if (sem_trywait(&(graph->semaphores[nextNode])) == 0) {
-                        // Successfully locked the node! Move into it and trigger the 1-second wait timer
-                        p->movingEntity.currentPos = targetPos;
-                        p->movingEntity.isWaiting = true;
-                        p->movingEntity.frameCounter = 1; // Mark frameCounter as 1 to distinguish from a blocked state
-                    } else {
-                        // Node is occupied! Keep trying every frame — reset isWaiting and frameCounter
-                        // so the sem_trywait branch stays reachable on the next update cycle.
-                        p->movingEntity.isWaiting = false;
-                        p->movingEntity.frameCounter = 0;
-                    }
-
-                // Attempt to acquire the next intersection semaphore safely without locking the main rendering thread
-                if (sem_trywait(&(graph->semaphores[nextNode])) == 0) {
-                    // Release the previously occupied graph vertex intersection to unlock it for waiting vehicles
-                    sem_post(&(graph->semaphores[currNode]));
-
-                    // Advance the passenger vehicle coordinates and increment its internal path timeline tracking index
-                    p->movingEntity.currentPos = targetPos;
-                    p->movingEntity.currentPathIndex++;
-                    p->movingEntity.isWaiting = false;
-                } else {
-                    p->movingEntity.isWaiting = true;
- master
-                }
+                p->movingEntity.currentPos = targetPos;
+                p->movingEntity.isWaiting = true;
             }
         } else {
             // Free the final destination node semaphore when the passenger permanently finishes its journey
