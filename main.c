@@ -239,7 +239,7 @@ int main() {
     Rectangle playBtn = { 650, 20, 120, 40 };
     Rectangle stopBtn = { 650, 70, 120, 40 };
 
-    InitWindow(800, 600, "Multi-Agent Graph Simulation - Milestone 5 Strict Match");
+    InitWindow(800, 600, "Multi-Agent Graph Simulation - Milestone 6");
     SetTargetFPS(60);
 
     bool process_logged_finished[MAX_PASSENGERS] = {false};
@@ -342,7 +342,10 @@ int main() {
 
         for (int i = 0; i < total_passengers; i++) {
             if (!process_logged_finished[i]) {
-                DrawCar(shared_passengers[i].movingEntity.currentPos, shared_passengers[i].carRotation, MAROON, shared_passengers[i].movingEntity.isWaiting);
+                Color carColors[] = { BLUE, GREEN, PURPLE, ORANGE };
+                Color myColor = carColors[i % 4]; //
+
+                DrawCar(shared_passengers[i].movingEntity.currentPos, shared_passengers[i].carRotation, myColor, shared_passengers[i].movingEntity.isWaiting);
                 DrawText(TextFormat("PID: %d", shared_passengers[i].id),
                          shared_passengers[i].movingEntity.currentPos.x - 20,
                          shared_passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
