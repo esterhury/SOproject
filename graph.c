@@ -401,10 +401,22 @@ void updateEntity(Entity* entity, Graph* graph, Path* path) {
 void drawEntity(Entity* entity) {
     if (!entity->isMoving && entity->currentPathIndex == 0) return;
 
-    DrawCircleV(entity->currentPos, 12, RED);
-    DrawCircleLinesV(entity->currentPos, 12, MAROON);
+    Color bodyColor = RED;
+    Color lineColor = MAROON;
+    const char* labelText = "BUS";
+    Color textColor = DARKGRAY;
 
-    DrawText("BUS", entity->currentPos.x - 15, entity->currentPos.y - 25, 12, DARKGRAY);
+    if (entity->isWaiting) {
+        bodyColor = ORANGE;
+        lineColor = ORANGE;
+        labelText = "Waiting...";
+        textColor = RED;
+    }
+
+    DrawCircleV(entity->currentPos, 12, bodyColor);
+    DrawCircleLinesV(entity->currentPos, 12, lineColor);
+
+    DrawText(labelText, entity->currentPos.x - 15, entity->currentPos.y - 25, 12, textColor);
 }
 
 /* Dynamic path calculation for a single passenger using Dijkstra's output */
@@ -507,29 +519,23 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
             p->carRotation = (atan2f(dy, dx) * (180.0f / PI)) + 180.0f;
 
             if (distance > dynamicSpeed) {
-                // The car is actively driving on the road, so it is NOT waiting
                 p->movingEntity.isWaiting = false;
                 p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
                 p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
             } else {
-                // Attempt to acquire the next intersection semaphore safely without locking the main rendering thread
-                if (sem_trywait(&(graph->semaphores[nextNode])) == 0) {
-                    // Release the previously occupied graph vertex intersection to unlock it for waiting vehicles
-                    sem_post(&(graph->semaphores[currNode]));
-
-                    // Advance the passenger vehicle coordinates and increment its internal path timeline tracking index
-                    p->movingEntity.currentPos = targetPos;
-                    p->movingEntity.currentPathIndex++;
-                    p->movingEntity.isWaiting = false;
-                } else {
-                    p->movingEntity.isWaiting = true;
-                }
+                p->movingEntity.currentPos = targetPos;
+                p->movingEntity.isWaiting = true;
             }
         } else {
             // Free the final destination node semaphore when the passenger permanently finishes its journey
             int finalNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
             sem_post(&(graph->semaphores[finalNode]));
             p->simulationFinished = true;
+
+            // --- FIX TO PREVENT DEADLOCK: Reset entity status so it doesn't block behind-vehicles ---
+            p->movingEntity.isMoving = false;
+            p->movingEntity.isWaiting = false;
+            p->movingEntity.frameCounter = 0;
         }
     }
 }
