@@ -13,6 +13,8 @@
 #include "raylib.h"
 #include "graph.h"
 
+#define MAX_NODES 100 // Safe upper bound for the junction arrays in the scheduler
+
 // Define the structure for IPC messages used for communication between child processes and the parent
 typedef struct {
     int agentIndex;
@@ -20,13 +22,22 @@ typedef struct {
     int nextNode;
     bool isWaiting;
     bool isFinished;
+    bool isRelease; // NEW: Flag notifying the parent that the vehicle has exited a junction
 } IPCMessage;
 
 // Global variables for process management and shared simulation state
 pid_t global_pids[MAX_PASSENGERS] = {0};
 int agent_pipes[MAX_PASSENGERS][2];
+int parent_to_child_pipes[MAX_PASSENGERS][2]; // NEW: Pipe from parent to child for junction access approvals
+
 Passenger shared_passengers[MAX_PASSENGERS];
 int total_passengers = 2; // Matched to 2 travelers from the professor's sample
+
+// --- SCHEDULER DATA STRUCTURES ---
+int junction_owner[MAX_NODES];
+int queues[MAX_NODES][MAX_PASSENGERS];
+int q_heads[MAX_NODES];
+int q_tails[MAX_NODES];
 
 // Member 1 - Milestone 6: Global graph pointer needed for the signal handler to free resources
 Graph* global_graph = NULL;
@@ -47,6 +58,8 @@ void handle_sigint(int sig) {
         // 2. Close communication pipes to release file descriptors
         close(agent_pipes[i][0]);
         close(agent_pipes[i][1]);
+        close(parent_to_child_pipes[i][0]);
+        close(parent_to_child_pipes[i][1]);
     }
 
     // 3. Clean up the shared graph resources and memory safely
@@ -111,17 +124,17 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
     if (!myPath.active || myPath.count <= 0) exit(1);
 
-    sem_wait(&(graph->semaphores[myPath.nodes[0]]));
-
-    IPCMessage msg = {
-        .agentIndex = agentIndex,
-        .currentNode = myPath.nodes[0],
-        .nextNode = (myPath.count > 1) ? myPath.nodes[1] : -1,
-        .isWaiting = false,
-        .isFinished = (myPath.count == 1)
-    };
-
+    int ack;
     int unused_ret;
+    IPCMessage msg;
+
+    // --- Request entry to the starting junction instead of sem_wait ---
+    msg = (IPCMessage){agentIndex, -1, myPath.nodes[0], true, false, false};
+    unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
+    unused_ret = read(parent_to_child_pipes[agentIndex][0], &ack, sizeof(int)); // Wait for approval from the parent
+
+    // Notify the parent that the vehicle successfully entered the junction (for rendering)
+    msg = (IPCMessage){agentIndex, myPath.nodes[0], (myPath.count > 1) ? myPath.nodes[1] : -1, false, (myPath.count == 1), false};
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
     for (int i = 0; i < myPath.count - 1; i++) {
@@ -132,20 +145,25 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
             usleep(25000);
         }
 
-        msg.currentNode = curr;
-        msg.nextNode = next;
-        msg.isWaiting = true;
+        // --- Request entry to the next junction instead of sem_wait ---
+        msg = (IPCMessage){agentIndex, curr, next, true, false, false};
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
-        sem_wait(&(graph->semaphores[next]));
-        sem_post(&(graph->semaphores[curr]));
+        // Blocking wait for approval from the parent
+        unused_ret = read(parent_to_child_pipes[agentIndex][0], &ack, sizeof(int));
 
-        msg.currentNode = next;
-        msg.nextNode = (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1;
-        msg.isWaiting = false;
-        if (i + 1 == myPath.count - 1) msg.isFinished = true;
+        // --- Release the previous junction instead of sem_post ---
+        msg = (IPCMessage){agentIndex, curr, next, false, false, true};
+        unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
+
+        // Update rendering for arriving at the junction
+        msg = (IPCMessage){agentIndex, next, (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1, false, (i + 1 == myPath.count - 1), false};
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
     }
+
+    // Release the final junction when the journey ends
+    msg = (IPCMessage){agentIndex, myPath.nodes[myPath.count - 1], -1, false, true, true};
+    unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
     (void)unused_ret;
 
@@ -156,7 +174,8 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
 void createTravelerProcesses(Graph* graph, int numTravelers, int sources[], int dests[]) {
     for (int i = 0; i < numTravelers; i++) {
-        if (pipe(agent_pipes[i]) < 0) {
+        // Create both communication channels
+        if (pipe(agent_pipes[i]) < 0 || pipe(parent_to_child_pipes[i]) < 0) {
             perror("Error: pipe failed");
             exit(1);
         }
@@ -172,10 +191,21 @@ void createTravelerProcesses(Graph* graph, int numTravelers, int sources[], int 
 
         if (global_pids[i] == 0) {
             close(agent_pipes[i][0]);
+            close(parent_to_child_pipes[i][1]); // The child only reads from this pipe
             runChildAgentLogic(graph, i, sources[i], dests[i]);
         } else {
             close(agent_pipes[i][1]);
+            close(parent_to_child_pipes[i][0]); // The parent only writes to this pipe
         }
+    }
+}
+
+// Helper function to reset the scheduler queues when restarting the simulation
+void resetScheduler(int numVertices) {
+    for (int v = 0; v < numVertices; v++) {
+        junction_owner[v] = -1;
+        q_heads[v] = 0;
+        q_tails[v] = 0;
     }
 }
 
@@ -199,6 +229,9 @@ int main() {
     if (numTravelers > 0 && numTravelers <= MAX_PASSENGERS) {
         total_passengers = numTravelers;
     }
+
+    // Reset the scheduler
+    resetScheduler(global_graph->numVertices);
 
     for (int i = 0; i < MAX_PASSENGERS; i++) {
         shared_passengers[i].simulationFinished = false;
@@ -226,7 +259,7 @@ int main() {
     Rectangle playBtn = { 650, 20, 120, 40 };
     Rectangle stopBtn = { 650, 70, 120, 40 };
 
-    InitWindow(800, 600, "Multi-Agent Graph Simulation - Milestone 5 Strict Match");
+    InitWindow(800, 600, "Multi-Agent Graph Simulation - Milestone 7 Core Logic");
     SetTargetFPS(60);
 
     bool process_logged_finished[MAX_PASSENGERS] = {false};
@@ -253,8 +286,10 @@ int main() {
                         visual_targets[i] = global_graph->positions[sources[i]];
                         process_logged_finished[i] = false;
                     }
+                    resetScheduler(global_graph->numVertices);
                     createTravelerProcesses(global_graph, total_passengers, sources, dests);
                 } else if (global_pids[0] == 0) {
+                    resetScheduler(global_graph->numVertices);
                     createTravelerProcesses(global_graph, total_passengers, sources, dests);
                 }
                 isRunning = true;
@@ -265,20 +300,56 @@ int main() {
             isRunning = false;
         }
 
-        // --- PARENT IPC INPUT TRACKING LOOP ---
+        // --- PARENT IPC INPUT TRACKING LOOP & SCHEDULER ---
         if (isRunning) {
             for (int i = 0; i < total_passengers; i++) {
                 IPCMessage incomingMsg;
                 ssize_t bytesRead = read(agent_pipes[i][0], &incomingMsg, sizeof(IPCMessage));
 
                 if (bytesRead == sizeof(IPCMessage)) {
-                    shared_passengers[i].id = global_pids[i];
-                    shared_passengers[i].movingEntity.isWaiting = incomingMsg.isWaiting;
 
-                    Vector2 currentJunctionPos = global_graph->positions[incomingMsg.currentNode];
+                    // Scenario 1: Junction release request (isRelease)
+                    if (incomingMsg.isRelease) {
+                        int freed_node = incomingMsg.currentNode;
+                        junction_owner[freed_node] = -1; // Mark the junction as free
 
+                        // Queue logic: check if anyone is waiting and wake them up
+                        if (q_heads[freed_node] < q_tails[freed_node]) {
+                            int next_agent = queues[freed_node][q_heads[freed_node]++];
+                            junction_owner[freed_node] = next_agent;
+                            int ack = 1;
+                            int unused_ret = write(parent_to_child_pipes[next_agent][1], &ack, sizeof(int));
+                            (void)unused_ret;
+                        }
+                        continue; // Skip rendering updates for release messages
+                    }
+
+                    // Scenario 2: Junction entry request (isWaiting)
                     if (incomingMsg.isWaiting) {
+                        int requested_node = incomingMsg.nextNode;
+                        shared_passengers[i].movingEntity.isWaiting = true;
+
+                        // Queue logic: approve entry or add to the queue
+                        if (junction_owner[requested_node] == -1) {
+                            // Junction is free! Grant immediate entry approval
+                            junction_owner[requested_node] = incomingMsg.agentIndex;
+                            int ack = 1;
+                            int unused_ret = write(parent_to_child_pipes[incomingMsg.agentIndex][1], &ack, sizeof(int));
+                            (void)unused_ret;
+                        } else {
+                            // Junction is occupied! Add the vehicle to the end of the queue
+                            queues[requested_node][q_tails[requested_node]++] = incomingMsg.agentIndex;
+                        }
+
+                        // Update the visual waiting position
+                        Vector2 currentJunctionPos;
+                        if (incomingMsg.currentNode != -1) {
+                            currentJunctionPos = global_graph->positions[incomingMsg.currentNode];
+                        } else {
+                            currentJunctionPos = global_graph->positions[incomingMsg.nextNode];
+                        }
                         Vector2 targetJunctionPos = global_graph->positions[incomingMsg.nextNode];
+
                         float dx = targetJunctionPos.x - currentJunctionPos.x;
                         float dy = targetJunctionPos.y - currentJunctionPos.y;
                         float len = sqrtf(dx*dx + dy*dy);
@@ -286,7 +357,15 @@ int main() {
                             visual_targets[i].x = targetJunctionPos.x - (dx / len) * 35.0f;
                             visual_targets[i].y = targetJunctionPos.y - (dy / len) * 35.0f;
                         }
-                    } else {
+                        continue;
+                    }
+
+                    // Scenario 3: Vehicle is driving after approval or reached the destination
+                    if (!incomingMsg.isWaiting && !incomingMsg.isRelease) {
+                        shared_passengers[i].movingEntity.isWaiting = false;
+                        shared_passengers[i].id = global_pids[i];
+
+                        Vector2 currentJunctionPos = global_graph->positions[incomingMsg.currentNode];
                         visual_targets[i] = currentJunctionPos;
 
                         if (incomingMsg.nextNode != -1) {
@@ -299,6 +378,7 @@ int main() {
                     }
                 }
 
+                // Movement animation
                 float dx = visual_targets[i].x - shared_passengers[i].movingEntity.currentPos.x;
                 float dy = visual_targets[i].y - shared_passengers[i].movingEntity.currentPos.y;
                 if (sqrtf(dx*dx + dy*dy) > 1.0f) {
