@@ -31,7 +31,7 @@ int agent_pipes[MAX_PASSENGERS][2];
 int parent_to_child_pipes[MAX_PASSENGERS][2]; // NEW: Pipe from parent to child for junction access approvals
 
 Passenger shared_passengers[MAX_PASSENGERS];
-int total_passengers = 2; // Matched to 2 travelers from the professor's sample
+int total_passengers = 3; // Matched to 3 travelers from the professor's sample
 
 // --- SCHEDULER DATA STRUCTURES ---
 int junction_owner[MAX_NODES];
@@ -124,7 +124,21 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
     if (!myPath.active || myPath.count <= 0) exit(1);
 
+<<<<<<< HEAD
     int ack;
+=======
+    // Lock the starting node
+    sem_wait(&(graph->semaphores[myPath.nodes[0]]));
+
+    IPCMessage msg = {
+        .agentIndex = agentIndex,
+        .currentNode = myPath.nodes[0],
+        .nextNode = (myPath.count > 1) ? myPath.nodes[1] : -1,
+        .isWaiting = false,
+        .isFinished = (myPath.count == 1)
+    };
+
+>>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
     int unused_ret;
     IPCMessage msg;
 
@@ -137,14 +151,17 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
     msg = (IPCMessage){agentIndex, myPath.nodes[0], (myPath.count > 1) ? myPath.nodes[1] : -1, false, (myPath.count == 1), false};
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
+    // Traverse the computed path
     for (int i = 0; i < myPath.count - 1; i++) {
         int curr = myPath.nodes[i];
         int next = myPath.nodes[i + 1];
 
-        for (int step = 0; step < 40; step++) {
-            usleep(25000);
+        // Simulate transit time along the edge
+        for (int step = 0; step < 150; step++) {
+            usleep(30000);
         }
 
+<<<<<<< HEAD
         // --- Request entry to the next junction instead of sem_wait ---
         msg = (IPCMessage){agentIndex, curr, next, true, false, false};
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
@@ -158,15 +175,43 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
         // Update rendering for arriving at the junction
         msg = (IPCMessage){agentIndex, next, (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1, false, (i + 1 == myPath.count - 1), false};
+=======
+        // Notify parent that the agent is waiting outside the next node
+        msg.currentNode = curr;
+        msg.nextNode = next;
+        msg.isWaiting = true;
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
+
+        // Enforce Mutual Exclusion: Block if the next node is occupied
+        sem_wait(&(graph->semaphores[next]));
+
+        // Successfully entered the next node: release the previous one
+        sem_post(&(graph->semaphores[curr]));
+
+        // Update status and notify parent
+        msg.currentNode = next;
+        msg.nextNode = (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1;
+        msg.isWaiting = false;
+        if (i + 1 == myPath.count - 1) msg.isFinished = true;
+>>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
+        unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
+
+        // Critical Section: Hold the node for exactly 1 second
+        sleep(1);
     }
 
+<<<<<<< HEAD
     // Release the final junction when the journey ends
     msg = (IPCMessage){agentIndex, myPath.nodes[myPath.count - 1], -1, false, true, true};
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
+=======
+    // Release the final destination node
+    sem_post(&(graph->semaphores[myPath.nodes[myPath.count - 1]]));
+>>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
     (void)unused_ret;
 
+    // Keep child alive until main simulation shutdown
     while (1) {
         sleep(1);
     }
@@ -215,8 +260,7 @@ int main() {
     int numTravelers = 0;
 
     // Load initial simulation configuration
-    global_graph = loadGraphFromFile("/home/student/CLionProjects/SOproject/input.txt", &sourcesArray, &destsArray, &numTravelers);
-    if (global_graph == NULL) {
+        global_graph = loadGraphFromFile("input.txt", &sourcesArray, &destsArray, &numTravelers);    if (global_graph == NULL) {
         printf("Error: Graph context could not be loaded safely.\n");
         return 1;
     }
@@ -259,7 +303,11 @@ int main() {
     Rectangle playBtn = { 650, 20, 120, 40 };
     Rectangle stopBtn = { 650, 70, 120, 40 };
 
+<<<<<<< HEAD
     InitWindow(800, 600, "Multi-Agent Graph Simulation - Milestone 7 Core Logic");
+=======
+    InitWindow(800, 600, "Multi-Agent Graph Simulation - Milestone 6");
+>>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
     SetTargetFPS(60);
 
     bool process_logged_finished[MAX_PASSENGERS] = {false};
@@ -409,7 +457,10 @@ int main() {
 
         for (int i = 0; i < total_passengers; i++) {
             if (!process_logged_finished[i]) {
-                DrawCar(shared_passengers[i].movingEntity.currentPos, shared_passengers[i].carRotation, MAROON, shared_passengers[i].movingEntity.isWaiting);
+                Color carColors[] = { BLUE, GREEN, PURPLE, ORANGE };
+                Color myColor = carColors[i % 4]; //
+
+                DrawCar(shared_passengers[i].movingEntity.currentPos, shared_passengers[i].carRotation, myColor, shared_passengers[i].movingEntity.isWaiting);
                 DrawText(TextFormat("PID: %d", shared_passengers[i].id),
                          shared_passengers[i].movingEntity.currentPos.x - 20,
                          shared_passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);

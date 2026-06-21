@@ -1,30 +1,44 @@
-# Compiler and Flags
+
+# The compiler executable to use
 CC = gcc
-CFLAGS = -Wall -Wextra -g -O2
-LIBS = -lraylib -lGL -lm -lpthread -ldl -lrt -lX11 $(shell pkg-config --libs raylib 2>/dev/null)
 
-# Source Files
-SRCS = main.c graph.c
-OBJS = $(SRCS:.c=.o)
-TARGET = sim
+CFLAGS = -Wall -Wextra -O2
 
-# Default Target
-all: milestone5
+LIBS = -L. -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 
-# Milestone 4 Target
-milestone4: clean $(OBJS)
-	$(CC) $(CFLAGS) $(OBJS) -o $(TARGET) $(LIBS)
+# Shared source files implementing common data structures and helper utilities
+SRC_SHARED = graph.c
 
-# Milestone 5 Target
-milestone5: clean $(OBJS)
-	$(CC) $(CFLAGS) $(OBJS) -o $(TARGET) $(LIBS)
+# Default target
+all: milestone6
 
-# Object Files Compilation
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+milestone1:
+	$(CC) $(CFLAGS) -o dijkstra main_milestone1.c $(SRC_SHARED) $(LIBS)
 
-# Cleanup Environment Target
+milestone2:
+	$(CC) $(CFLAGS) -o sim main.c $(SRC_SHARED) $(LIBS)
+
+milestone3:
+	$(CC) $(CFLAGS) -o sim main.c $(SRC_SHARED) $(LIBS)
+
+milestone4:
+	$(CC) $(CFLAGS) -o sim main.c $(SRC_SHARED) $(LIBS)
+
+milestone5:
+	$(CC) $(CFLAGS) -o sim main.c $(SRC_SHARED) $(LIBS)
+
+milestone6:
+	$(CC) $(CFLAGS) -o sim main.c $(SRC_SHARED) $(LIBS)
+
+
+mailstone1: milestone1
+mailstone2: milestone2
+mailstone3: milestone3
+mailstone4: milestone4
+mailstone5: milestone5
+mailstone6: milestone6
+
+
+# Removes compiled binary executables and intermediate object files to ensure a clean rebuild environment
 clean:
-	rm -f $(TARGET) *.o
-
-.PHONY: all milestone4 milestone5 clean
+	rm -f sim dijkstra *.o

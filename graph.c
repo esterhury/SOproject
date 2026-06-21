@@ -432,7 +432,32 @@ void updateEntity(Entity* entity, Graph* graph, Path* path) {
     }
 }
 
+<<<<<<< HEAD
 // Calculates and initializes the routing state and data for a single passenger agent
+=======
+void drawEntity(Entity* entity) {
+    if (!entity->isMoving && entity->currentPathIndex == 0) return;
+
+    Color bodyColor = RED;
+    Color lineColor = MAROON;
+    const char* labelText = "BUS";
+    Color textColor = DARKGRAY;
+
+    if (entity->isWaiting) {
+        bodyColor = ORANGE;
+        lineColor = ORANGE;
+        labelText = "Waiting...";
+        textColor = RED;
+    }
+
+    DrawCircleV(entity->currentPos, 12, bodyColor);
+    DrawCircleLinesV(entity->currentPos, 12, lineColor);
+
+    DrawText(labelText, entity->currentPos.x - 15, entity->currentPos.y - 25, 12, textColor);
+}
+
+/* Dynamic path calculation for a single passenger using Dijkstra's output */
+>>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
 void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst) {
     // Validate that graph and passenger pointers are safely allocated
     if (graph == NULL || passenger == NULL) {
@@ -536,11 +561,26 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
                 p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
             } else {
                 p->movingEntity.currentPos = targetPos;
+<<<<<<< HEAD
                 p->movingEntity.currentPathIndex++;
                 p->movingEntity.isWaiting = false;
             }
         } else {
             p->simulationFinished = true; // Destination reached
+=======
+                p->movingEntity.isWaiting = true;
+            }
+        } else {
+            // Free the final destination node semaphore when the passenger permanently finishes its journey
+            int finalNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
+            sem_post(&(graph->semaphores[finalNode]));
+            p->simulationFinished = true;
+
+            // --- FIX TO PREVENT DEADLOCK: Reset entity status so it doesn't block behind-vehicles ---
+            p->movingEntity.isMoving = false;
+            p->movingEntity.isWaiting = false;
+            p->movingEntity.frameCounter = 0;
+>>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
         }
     }
 }
