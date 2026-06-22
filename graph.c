@@ -211,3 +211,94 @@ void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool i
         }
     }
 }
+
+
+// Load graph structure and dynamic travelers arrays from the input file
+Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int** prioritiesArray, int* numTravelers) {
+
+    // Open the input file for reading operations only
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        printf("Error: Could not open file.\n");
+        return NULL;
+    }
+
+    // Read the total number of vertices (n) and edges (m) from the first line
+    int n, m;
+    if (fscanf(file, "%d %d", &n, &m) != 2) {
+        fclose(file);
+        return NULL;
+    }
+
+    // Allocate memory and initialize the graph structure
+    Graph* graph = createGraph(n);
+
+    // Loop through all edges and add them to the adjacency list
+    for (int i = 0; i < m; i++) {
+        int u, v, w;
+        if (fscanf(file, "%d %d %d", &u, &v, &w) == 3) {
+            if (w < 0) {
+                printf("Error: Invalid input. Weights cannot be negative.\n");
+                fclose(file);
+                freeGraph(graph);
+                return NULL;
+            }
+            addEdge(graph, u, v, w);
+        }
+    }
+
+    char line[256];
+    bool foundTravelers = false;
+
+    // Scan the file line by line to locate the travelers header
+    while (fgets(line, sizeof(line), file)) {
+        if (strstr(line, "travelers") != NULL) {
+            foundTravelers = true;
+            break;
+        }
+    }
+
+    if (!foundTravelers) {
+        printf("Error: No Travelers found.\n");
+        *numTravelers = 0;
+        *sourcesArray = NULL;
+        *destsArray = NULL;
+        *prioritiesArray = NULL;
+        fclose(file);
+        return graph;
+    }
+
+    // Read the total number of travelers located right under the header
+    if (fscanf(file, "%d", numTravelers) != 1) {
+        printf("Error: could not read number of travelers.\n");
+        *numTravelers = 0;
+        fclose(file);
+        return graph;
+    }
+
+    // Allocate dynamic memory on the Heap for source, destination, and priorities arrays
+    *sourcesArray = (int*)malloc((*numTravelers) * sizeof(int));
+    *destsArray = (int*)malloc((*numTravelers) * sizeof(int));
+    *prioritiesArray = (int*)malloc((*numTravelers) * sizeof(int)); // <-- הקצאה עבור אבן דרך 7!
+
+    if (*sourcesArray == NULL || *destsArray == NULL || *prioritiesArray == NULL) {
+        printf("Error: Memory allocation failed for travelers arrays.\n");
+        *numTravelers = 0;
+        fclose(file);
+        return graph;
+    }
+
+    // Read all individual source, destination, and priority triplets
+    for (int i = 0; i < *numTravelers; i++) {
+        // קורא 3 מספרים מהקובץ: מקור, יעד ועדיפות/זמן
+        if (fscanf(file, "%d %d %d", &((*sourcesArray)[i]), &((*destsArray)[i]), &((*prioritiesArray)[i])) != 3) {
+            printf("Warning: Error reading data for traveler %d. Setting default priority to 1.\n", i);
+            (*sourcesArray)[i] = -1;
+            (*destsArray)[i] = -1;
+            (*prioritiesArray)[i] = 1; // עדיפות ברירת מחדל אם אין נתון
+        }
+    }
+
+    fclose(file);
+    return graph;
+}

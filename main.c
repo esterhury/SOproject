@@ -38,6 +38,7 @@ int junction_owner[MAX_NODES];
 int queues[MAX_NODES][MAX_PASSENGERS];
 int q_heads[MAX_NODES];
 int q_tails[MAX_NODES];
+char scheduler_mode[10] = "fcfs";
 
 // Member 1 - Milestone 6: Global graph pointer needed for the signal handler to free resources
 Graph* global_graph = NULL;
@@ -124,25 +125,11 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
     if (!myPath.active || myPath.count <= 0) exit(1);
 
-<<<<<<< HEAD
     int ack;
-=======
-    // Lock the starting node
-    sem_wait(&(graph->semaphores[myPath.nodes[0]]));
-
-    IPCMessage msg = {
-        .agentIndex = agentIndex,
-        .currentNode = myPath.nodes[0],
-        .nextNode = (myPath.count > 1) ? myPath.nodes[1] : -1,
-        .isWaiting = false,
-        .isFinished = (myPath.count == 1)
-    };
-
->>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
     int unused_ret;
     IPCMessage msg;
 
-    // --- Request entry to the starting junction instead of sem_wait ---
+    //Request entry to the starting junction instead of sem_wait
     msg = (IPCMessage){agentIndex, -1, myPath.nodes[0], true, false, false};
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
     unused_ret = read(parent_to_child_pipes[agentIndex][0], &ack, sizeof(int)); // Wait for approval from the parent
@@ -161,54 +148,29 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
             usleep(30000);
         }
 
-<<<<<<< HEAD
-        // --- Request entry to the next junction instead of sem_wait ---
+        //Request entry to the next junction instead of sem_wait
         msg = (IPCMessage){agentIndex, curr, next, true, false, false};
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
         // Blocking wait for approval from the parent
         unused_ret = read(parent_to_child_pipes[agentIndex][0], &ack, sizeof(int));
 
-        // --- Release the previous junction instead of sem_post ---
+        //Release the previous junction instead of sem_post
         msg = (IPCMessage){agentIndex, curr, next, false, false, true};
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
         // Update rendering for arriving at the junction
         msg = (IPCMessage){agentIndex, next, (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1, false, (i + 1 == myPath.count - 1), false};
-=======
-        // Notify parent that the agent is waiting outside the next node
-        msg.currentNode = curr;
-        msg.nextNode = next;
-        msg.isWaiting = true;
-        unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
-
-        // Enforce Mutual Exclusion: Block if the next node is occupied
-        sem_wait(&(graph->semaphores[next]));
-
-        // Successfully entered the next node: release the previous one
-        sem_post(&(graph->semaphores[curr]));
-
-        // Update status and notify parent
-        msg.currentNode = next;
-        msg.nextNode = (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1;
-        msg.isWaiting = false;
-        if (i + 1 == myPath.count - 1) msg.isFinished = true;
->>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
         // Critical Section: Hold the node for exactly 1 second
         sleep(1);
     }
 
-<<<<<<< HEAD
     // Release the final junction when the journey ends
     msg = (IPCMessage){agentIndex, myPath.nodes[myPath.count - 1], -1, false, true, true};
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
-=======
-    // Release the final destination node
-    sem_post(&(graph->semaphores[myPath.nodes[myPath.count - 1]]));
->>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
     (void)unused_ret;
 
     // Keep child alive until main simulation shutdown
@@ -254,13 +216,46 @@ void resetScheduler(int numVertices) {
     }
 }
 
-int main() {
+
+// Helper function to sort a junction queue by passenger priority (SJF/Priority Scheduling)
+void sortQueueByPriority(int node, int agent_index) {
+    // If we are in FCFS mode, we don't sort anything; it stays first-come, first-served
+    if (strcmp(scheduler_mode, "fcfs") == 0) {
+        return;
+    }
+
+    // If we are in priority mode, sort the queue elements between q_heads and q_tails
+    int head = q_heads[node];
+    int tail = q_tails[node];
+
+    for (int i = head; i < tail - 1; i++) {
+        for (int j = head; j < tail - 1 - (i - head); j++) {
+            int agentA = queues[node][j];
+            int agentB = queues[node][j + 1];
+
+            if (shared_passengers[agentA].priority > shared_passengers[agentB].priority) {
+                int temp = queues[node][j];
+                queues[node][j] = queues[node][j + 1];
+                queues[node][j + 1] = temp;
+            }
+        }
+    }
+}
+
+
+int main(int argc, char* argv[]) {
+    if (argc > 1) {
+        strncpy(scheduler_mode, argv[1], sizeof(scheduler_mode) - 1);
+    }
+
     int* sourcesArray = NULL;
     int* destsArray = NULL;
+    int* prioritiesArray = NULL;
     int numTravelers = 0;
 
     // Load initial simulation configuration
-        global_graph = loadGraphFromFile("input.txt", &sourcesArray, &destsArray, &numTravelers);    if (global_graph == NULL) {
+    global_graph = loadGraphFromFile("input.txt", &sourcesArray, &destsArray, &prioritiesArray, &numTravelers);
+    if (global_graph == NULL) {
         printf("Error: Graph context could not be loaded safely.\n");
         return 1;
     }
@@ -297,17 +292,15 @@ int main() {
         shared_passengers[i].shortestPath.active = true;
         shared_passengers[i].movingEntity.currentPos = global_graph->positions[sources[i]];
         visual_targets[i] = global_graph->positions[sources[i]];
+        shared_passengers[i].priority = prioritiesArray[i];
     }
 
     bool isRunning = false;
     Rectangle playBtn = { 650, 20, 120, 40 };
     Rectangle stopBtn = { 650, 70, 120, 40 };
 
-<<<<<<< HEAD
-    InitWindow(800, 600, "Multi-Agent Graph Simulation - Milestone 7 Core Logic");
-=======
+
     InitWindow(800, 600, "Multi-Agent Graph Simulation - Milestone 6");
->>>>>>> 4b300ac321072b3c65de9355f7d120d36651b71a
     SetTargetFPS(60);
 
     bool process_logged_finished[MAX_PASSENGERS] = {false};
@@ -335,10 +328,10 @@ int main() {
                         process_logged_finished[i] = false;
                     }
                     resetScheduler(global_graph->numVertices);
-                    createTravelerProcesses(global_graph, total_passengers, sources, dests);
+                    createTravelerProcesses(global_graph, total_passengers, sourcesArray, destsArray);
                 } else if (global_pids[0] == 0) {
                     resetScheduler(global_graph->numVertices);
-                    createTravelerProcesses(global_graph, total_passengers, sources, dests);
+                    createTravelerProcesses(global_graph, total_passengers, sourcesArray, destsArray); // <-- גם כאן להעביר את האריי הדינמי!
                 }
                 isRunning = true;
             }
@@ -387,6 +380,7 @@ int main() {
                         } else {
                             // Junction is occupied! Add the vehicle to the end of the queue
                             queues[requested_node][q_tails[requested_node]++] = incomingMsg.agentIndex;
+                            sortQueueByPriority(requested_node, incomingMsg.agentIndex);
                         }
 
                         // Update the visual waiting position

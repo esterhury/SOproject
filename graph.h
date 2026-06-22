@@ -52,6 +52,7 @@ typedef struct {
     Entity movingEntity;
     float carRotation;
     bool simulationFinished;
+    int priority;
 } Passenger;
 
 // ============================================================================
@@ -61,7 +62,7 @@ typedef struct {
 // --- Core Graph Management ---
 Graph* createGraph(int vertices);
 void addEdge(Graph* graph, int src, int dest, int weight);
-Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int* numTravelers);
+Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int** prioritiesArray, int* numTravelers);
 void freeGraph(Graph* graph);
 void computePosition(Graph* graph);
 void drawGraph(Graph* graph, Path path);
