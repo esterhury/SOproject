@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,8 +8,14 @@
 #include <stdbool.h>
 #include <math.h>
 #include <string.h>
-#include  <sys/mman.h>
+#include <sys/mman.h>
 #include <semaphore.h>
+
+// --- NEW: Static variables for centralized queue management (Bat 1) ---
+static NodeQueue nodeQueues[1000];
+static int globalArrivalCounter = 0;
+static int nodeOwner[1000];
+// ---------------------------------------------------------------------
 
 // Create a new graph with a given number of vertices
 Graph* createGraph(int vertices){
@@ -20,6 +27,7 @@ Graph* createGraph(int vertices){
         graph->adjLists[i] = NULL;
     }
     graph->positions = (Vector2*)malloc(vertices * sizeof(Vector2));
+
     // Allocate a contiguous array of semaphores within a shared memory block for cross-process synchronization
     graph->semaphores = (sem_t*)mmap(NULL, vertices * sizeof(sem_t),
                                      PROT_READ | PROT_WRITE,
@@ -27,7 +35,8 @@ Graph* createGraph(int vertices){
     if (graph->semaphores == MAP_FAILED) {// Validate that the shared memory allocation for the semaphore array succeeded completely
         perror("Error: mmap failed for semaphores");
         exit(1);
-     }
+    }
+
     // Initialize each vertex semaphore to be shared among processes and set its initial capacity to 1
     for (int i = 0; i < vertices; i++) {
         if (sem_init(&(graph->semaphores[i]), 1, 1) != 0) {
@@ -35,6 +44,20 @@ Graph* createGraph(int vertices){
             exit(1);
         }
     }
+
+    // --- NEW: Allocate private agent semaphores for parent-driven centralized control ---
+    graph->agent_semaphores = (sem_t*)mmap(NULL, MAX_PASSENGERS * sizeof(sem_t),
+                                           PROT_READ | PROT_WRITE,
+                                           MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (graph->agent_semaphores == MAP_FAILED) {
+        perror("Error: mmap failed for agent semaphores");
+        exit(1);
+    }
+    for (int i = 0; i < MAX_PASSENGERS; i++) {
+        sem_init(&(graph->agent_semaphores[i]), 1, 0); // Start blocked (0)
+    }
+    // --------------------------------------------------------------------------------
+
     return graph;
 }
 
@@ -48,7 +71,8 @@ void addEdge(Graph* graph, int src, int dest, int weight) {
 }
 
 // Load graph structure and dynamic travelers arrays from the input file
-Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int* numTravelers) {
+// --- NEW: Updated signature and logic to parse burst times for SJF ---
+Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int** burstTimesArray, int* numTravelers) {
 
     // Open the input file for reading operations only
     FILE* file = fopen(filename, "r");
@@ -100,6 +124,7 @@ Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsAr
         *numTravelers = 0;
         *sourcesArray = NULL;
         *destsArray = NULL;
+        *burstTimesArray = NULL; // NEW
         fclose(file);
         return graph;
     }
@@ -112,25 +137,34 @@ Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsAr
         return graph;
     }
 
-    // Allocate dynamic memory on the Heap for source and destination arrays
+    // Allocate dynamic memory on the Heap for source, destination, and burst time arrays
     *sourcesArray = (int*)malloc((*numTravelers) * sizeof(int));
     *destsArray = (int*)malloc((*numTravelers) * sizeof(int));
+    *burstTimesArray = (int*)malloc((*numTravelers) * sizeof(int)); // NEW
 
     // Verify that memory allocation for the dynamic arrays succeeded completely
-    if (*sourcesArray == NULL || *destsArray == NULL) {
+    if (*sourcesArray == NULL || *destsArray == NULL || *burstTimesArray == NULL) {
         printf("Error: Memory allocation failed for travelers arrays.\n");
         *numTravelers = 0;
         fclose(file);
         return graph;
     }
 
-    // Read all individual source and destination pairs into the allocated arrays
+    // Read all individual source, destination, and (optional) burst time parameters
     for (int i = 0; i < *numTravelers; i++) {
-        // Extract traveler data directly into the array indices via pointers
-        if (fscanf(file, "%d %d", &((*sourcesArray)[i]), &((*destsArray)[i])) != 2) {
+        int src, dst, burst = 10;
+        // Attempt to read 3 values: Source, Destination, and Burst Time
+        int readCount = fscanf(file, "%d %d %d", &src, &dst, &burst);
+
+        if (readCount >= 2) {
+            (*sourcesArray)[i] = src;
+            (*destsArray)[i] = dst;
+            (*burstTimesArray)[i] = (readCount == 3) ? burst : 10; // Default to 10 if burst time is missing
+        } else {
             printf("Warning: Error reading data for traveler %d. Setting to -1.\n", i);
             (*sourcesArray)[i] = -1;
             (*destsArray)[i] = -1;
+            (*burstTimesArray)[i] = 10;
         }
     }
 
@@ -148,6 +182,15 @@ void freeGraph(Graph* graph) {
         }
         munmap(graph->semaphores, graph->numVertices * sizeof(sem_t));
     }
+
+    // --- NEW: Clean up the new agent semaphores ---
+    if (graph->agent_semaphores != NULL) {
+        for (int i = 0; i < MAX_PASSENGERS; i++) {
+            sem_destroy(&(graph->agent_semaphores[i]));
+        }
+        munmap(graph->agent_semaphores, MAX_PASSENGERS * sizeof(sem_t));
+    }
+    // ----------------------------------------------
 
     for (int i = 0; i < graph->numVertices; i++) {
         Node* temp = graph->adjLists[i];
@@ -345,197 +388,94 @@ Path reconstructPath(int* parent, int src, int dst) {
     return p;
 }
 
-void updateEntity(Entity* entity, Graph* graph, Path* path) {
-    if (!entity->isMoving || !path->active || entity->currentPathIndex >= path->count - 1) {
-        return;
+
+// =================================================================
+// NEW: Bat 1 Centralized API Implementation (Queue Management & Scheduling)
+// =================================================================
+
+// Initializes the tracking arrays for all node queues
+void initNodeQueues(int numVertices) {
+    globalArrivalCounter = 0;
+    for (int i = 0; i < numVertices; i++) {
+        nodeQueues[i].count = 0;
+        nodeOwner[i] = -1; // -1 means the node is currently free
     }
+}
 
-    int u = path->nodes[entity->currentPathIndex];
-    int v = path->nodes[entity->currentPathIndex + 1];
+// Adds a vehicle to the waiting queue of a specific node
+void addToNodeQueue(int node, int agentIndex, int burstTime) {
+    if (node < 0 || node >= 1000) return;
+    int c = nodeQueues[node].count;
+    if (c >= MAX_PASSENGERS) return; // Prevent overflow
 
-    int weight = 1;
-    Node* temp = graph->adjLists[u];
-    while (temp) {
-        if (temp->dest == v) {
-            weight = temp->weight;
-            break;
-        }
-        temp = temp->next;
-    }
+    nodeQueues[node].queue[c].agentIndex = agentIndex;
+    nodeQueues[node].queue[c].burstTime = burstTime;
+    nodeQueues[node].queue[c].arrivalOrder = globalArrivalCounter++; // Important for FCFS tie-breaking
+    nodeQueues[node].count++;
+}
 
-    if (entity->isWaiting) {
-        entity->frameCounter++;
-        if (entity->frameCounter >= 60) {
-            entity->isWaiting = false;
-            entity->frameCounter = 0;
-            entity->currentStep = 0;
-        }
-        return;
-    }
+// The core logic function: decides who enters the intersection next
+int scheduleNextAgent(int node, int algorithmType) {
+    if (node < 0 || node >= 1000 || nodeQueues[node].count == 0) return -1;
 
-    entity->frameCounter++;
+    int bestIndex = 0;
+    NodeQueue* nq = &nodeQueues[node];
 
-    if (entity->frameCounter >= 18) {
-        entity->currentStep++;
-        entity->frameCounter = 0;
-
-        float t = (float)entity->currentStep / weight;
-
-        if (t > 1.0f) t = 1.0f;
-
-        entity->currentPos.x = graph->positions[u].x + t * (graph->positions[v].x - graph->positions[u].x);
-        entity->currentPos.y = graph->positions[u].y + t * (graph->positions[v].y - graph->positions[u].y);
-
-        if (entity->currentStep >= weight) {
-            entity->currentPathIndex++;
-
-            if (entity->currentPathIndex < path->count - 1) {
-                entity->isWaiting = true;
-            } else {
-                entity->isMoving = false;
+    for (int i = 1; i < nq->count; i++) {
+        if (algorithmType == SCHEDULING_FCFS) {
+            // First-Come, First-Served Logic
+            if (nq->queue[i].arrivalOrder < nq->queue[bestIndex].arrivalOrder) {
+                bestIndex = i;
             }
-        }
-    }
-}
-
-void drawEntity(Entity* entity) {
-    if (!entity->isMoving && entity->currentPathIndex == 0) return;
-
-    Color bodyColor = RED;
-    Color lineColor = MAROON;
-    const char* labelText = "BUS";
-    Color textColor = DARKGRAY;
-
-    if (entity->isWaiting) {
-        bodyColor = ORANGE;
-        lineColor = ORANGE;
-        labelText = "Waiting...";
-        textColor = RED;
-    }
-
-    DrawCircleV(entity->currentPos, 12, bodyColor);
-    DrawCircleLinesV(entity->currentPos, 12, lineColor);
-
-    DrawText(labelText, entity->currentPos.x - 15, entity->currentPos.y - 25, 12, textColor);
-}
-
-/* Dynamic path calculation for a single passenger using Dijkstra's output */
-void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst) {
-    // PROTECT: Validate that graph and passenger pointers are completely valid
-    if (graph == NULL || passenger == NULL) {
-        printf("[ERROR] calculatePassengerRoute received a NULL graph or passenger pointer!\n");
-        return;
-    }
-
-    // PROTECT: Validate node boundary constraints to prevent array overflow limits
-    if (src < 0 || src >= graph->numVertices || dst < 0 || dst >= graph->numVertices) {
-        printf("[WARNING] Invalid src (%d) or dst (%d) for passenger route calculation.\n", src, dst);
-        passenger->shortestPath.active = false;
-        passenger->simulationFinished = true;
-        return;
-    }
-
-    int* parent = (int*)malloc(graph->numVertices * sizeof(int));
-    if (parent == NULL) {
-        printf("[ERROR] Memory allocation failed for parent array in route calculation.\n");
-        return;
-    }
-
-    // Execute Dijkstra calculation safely
-    dijkstra(graph, src, dst, parent);
-    passenger->shortestPath = reconstructPath(parent, src, dst);
-
-    passenger->simulationFinished = false;
-    passenger->carRotation = 0.0f;
-
-    // Set positions only if a valid path was generated by reconstructPath
-    if (passenger->shortestPath.active && passenger->shortestPath.count > 0) {
-        int firstNode = passenger->shortestPath.nodes[0];
-
-        // PROTECT: Ensure graph structural positions are allocated before accessing coordinates
-        if (graph->positions != NULL) {
-            passenger->movingEntity.currentPos = graph->positions[firstNode];
-        } else {
-            passenger->movingEntity.currentPos = (Vector2){ 0.0f, 0.0f };
-        }
-
-        // Lock the very first node of the path so no other vehicle can spawn or sit on it simultaneously
-        sem_wait(&(graph->semaphores[firstNode]));
-
-        passenger->movingEntity.currentPathIndex = 0;
-        passenger->movingEntity.frameCounter = 0;
-        passenger->movingEntity.currentStep = 0;
-        passenger->movingEntity.isWaiting = false;
-    } else {
-        passenger->simulationFinished = true; // Mark as finished if no valid path exists
-    }
-
-    free(parent);
-}
-
-// Multi-agent system tracking to advance all active travelers simultaneously
-void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool isRunning) {
-    if (!isRunning || graph == NULL || passengers == NULL) return;
-
-    for (int i = 0; i < count; i++) {
-        Passenger* p = &passengers[i];
-
-        if (p->simulationFinished || !p->shortestPath.active) continue;
-
-        if (p->movingEntity.currentPathIndex < p->shortestPath.count - 1) {
-            int currNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
-            int nextNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex + 1];
-
-            if (currNode < 0 || currNode >= graph->numVertices || nextNode < 0 || nextNode >= graph->numVertices) {
-                p->simulationFinished = true;
-                continue;
-            }
-
-            float weight = 1.0f;
-            Node* temp = graph->adjLists[currNode];
-            while (temp) {
-                if (temp->dest == nextNode) {
-                    weight = (float)temp->weight;
-                    break;
+        } else if (algorithmType == SCHEDULING_SJF) {
+            // Shortest Job First Logic
+            if (nq->queue[i].burstTime < nq->queue[bestIndex].burstTime) {
+                bestIndex = i;
+            } else if (nq->queue[i].burstTime == nq->queue[bestIndex].burstTime) {
+                // Break ties using FCFS
+                if (nq->queue[i].arrivalOrder < nq->queue[bestIndex].arrivalOrder) {
+                    bestIndex = i;
                 }
-                temp = temp->next;
             }
-
-            if (weight <= 0.0f) weight = 1.0f;
-
-            float baseSpeed = 5.0f;
-            float dynamicSpeed = baseSpeed / weight;
-
-            if (graph->positions == NULL) continue;
-
-            Vector2 targetPos = graph->positions[nextNode];
-            float dx = targetPos.x - p->movingEntity.currentPos.x;
-            float dy = targetPos.y - p->movingEntity.currentPos.y;
-            float distance = sqrtf(dx * dx + dy * dy);
-
-            // --- FIXED: FORWARD FACING ROTATION SYSTEM ---
-            // Added exactly +180.0f offset here to completely align the texture
-            // of your rectangle so that it drives forward contextually.
-            p->carRotation = (atan2f(dy, dx) * (180.0f / PI)) + 180.0f;
-
-            if (distance > dynamicSpeed) {
-                p->movingEntity.isWaiting = false;
-                p->movingEntity.currentPos.x += (dx / distance) * dynamicSpeed;
-                p->movingEntity.currentPos.y += (dy / distance) * dynamicSpeed;
-            } else {
-                p->movingEntity.currentPos = targetPos;
-                p->movingEntity.isWaiting = true;
-            }
-        } else {
-            // Free the final destination node semaphore when the passenger permanently finishes its journey
-            int finalNode = p->shortestPath.nodes[p->movingEntity.currentPathIndex];
-            sem_post(&(graph->semaphores[finalNode]));
-            p->simulationFinished = true;
-
-            // --- FIX TO PREVENT DEADLOCK: Reset entity status so it doesn't block behind-vehicles ---
-            p->movingEntity.isMoving = false;
-            p->movingEntity.isWaiting = false;
-            p->movingEntity.frameCounter = 0;
         }
     }
+
+    int selectedAgent = nq->queue[bestIndex].agentIndex;
+
+    // Remove the selected vehicle from the queue and shift others down
+    for (int i = bestIndex; i < nq->count - 1; i++) {
+        nq->queue[i] = nq->queue[i + 1];
+    }
+    nq->count--;
+
+    nodeOwner[node] = selectedAgent; // Lock the node for the selected vehicle
+    return selectedAgent;
+}
+
+// Marks a node as free when a vehicle leaves
+void releaseNode(int node) {
+    if (node >= 0 && node < 1000) nodeOwner[node] = -1;
+}
+
+// Checks who currently occupies a node
+int getNodeOwner(int node) {
+    if (node >= 0 && node < 1000) return nodeOwner[node];
+    return -1;
+}
+
+// --- NEW: Dummy implementations for visual updates (Now handled centrally in main.c) ---
+void updateEntity(Entity* entity, Graph* graph, Path* path) {
+    (void)entity; (void)graph; (void)path;
+}
+void drawEntity(Entity* entity) {
+    (void)entity;
+}
+void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool isRunning) {
+    // This is intentionally left empty. Bat 1 milestone requires the parent process (main.c)
+    // to handle all updates centrally, replacing this distributed approach.
+    (void)graph; (void)passengers; (void)count; (void)isRunning;
+}
+void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst) {
+    // Intentionally empty. Handled locally inside the child process now.
+    (void)graph; (void)passenger; (void)src; (void)dst;
 }

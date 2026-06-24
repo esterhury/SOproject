@@ -10,6 +10,10 @@
 #define EDGE_STEP_TIME 18   // Frame interval duration before executing a linear interpolation step
 #define MAX_PASSENGERS 20   // Maximum administrative array bound capacity for passenger tracking
 
+// NEW: Constants for Milestone 7 Scheduling Algorithms (FCFS vs SJF)
+#define SCHEDULING_FCFS 0
+#define SCHEDULING_SJF  1
+
 // Node structure for adjacency list representations of the graph network
 typedef struct Node {
     int dest;                  // Destination vertex index of the directed edge
@@ -23,8 +27,8 @@ typedef struct {
     Node** adjLists;           // Dynamic array of head pointers forming individual adjacency lists
     Vector2* positions;        // Screen coordinate locations (X, Y pixels) assigned to vertices for rendering
     sem_t* semaphores;         // Pointer to a contiguous shared memory array of vertex intersection semaphores
+    sem_t* agent_semaphores;   // NEW: Dedicated semaphores for the parent to control each specific vehicle remotely
 } Graph;
-
 
 // Container layout storing computed shortest-path route arrays
 typedef struct {
@@ -50,12 +54,26 @@ typedef struct {
     Entity movingEntity;       // Mechanical visual translation state profile of the corresponding vehicle
     float carRotation;         // Current vehicle orientation angle (degrees) relative to its direction vector
     bool simulationFinished;   // Boolean flag indicating if this agent has reached its target terminal destination
+    int burstTime;             // NEW: Execution time/priority parameter needed for the SJF algorithm
 } Passenger;
+
+// NEW: Data structures for Centralized Node Queues (Bat 1 Task)
+typedef struct {
+    int agentIndex;
+    int burstTime;
+    int arrivalOrder;
+} WaitingAgent;
+
+typedef struct {
+    WaitingAgent queue[MAX_PASSENGERS];
+    int count;
+} NodeQueue;
 
 // Core graph management and structural modification interfaces
 Graph* createGraph(int vertices);
 void addEdge(Graph* graph, int src, int dest, int weight);
-Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int* numTravelers);
+// NEW: Updated signature to extract burst times from input
+Graph* loadGraphFromFile(const char* filename, int** sourcesArray, int** destsArray, int** burstTimesArray, int* numTravelers);
 void freeGraph(Graph* graph);
 void computePosition(Graph* graph);
 void drawGraph(Graph* graph, Path path);
@@ -69,5 +87,12 @@ void printPath(int* parent, int src, int dst);
 void updateEntity(Entity* entity, Graph* graph, Path* path);
 void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst);
 void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool isRunning);
+
+// NEW:  Centralized API functions
+void initNodeQueues(int numVertices);
+void addToNodeQueue(int node, int agentIndex, int burstTime);
+int scheduleNextAgent(int node, int algorithmType);
+void releaseNode(int node);
+int getNodeOwner(int node);
 
 #endif // GRAPH_H
