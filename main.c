@@ -33,8 +33,12 @@ Graph* global_graph = NULL;
 Vector2 visual_targets[MAX_PASSENGERS];
 float animation_speed = 0.04f;
 
+#define SCHEDULING_FCFS 0
+#define SCHEDULING_PRIORITY 1
+
 // NEW: Variable to track the active centralized scheduling algorithm (FCFS or SJF)
 int current_algorithm = SCHEDULING_FCFS;
+
 
 // Member 1 - Milestone 6: Signal handler for graceful simulation shutdown
 // This function catches interrupt signals (like Ctrl+C) to prevent zombie processes
@@ -242,7 +246,7 @@ int main() {
         shared_passengers[i].movingEntity.currentPathIndex = 0;
 
         shared_passengers[i].carRotation = 0.0f;
-        shared_passengers[i].burstTime = 10; // NEW: Default burst time
+        shared_passengers[i].priority = 10; // NEW: Default priority
     }
 
     int sources[MAX_PASSENGERS];
@@ -255,7 +259,7 @@ int main() {
 
     for (int i = 0; i < total_passengers; i++) {
         shared_passengers[i].id = 1000 + i;
-        shared_passengers[i].burstTime = burstTimes[i]; // NEW: Assign burst time to passenger struct
+        shared_passengers[i].priority = burstTimes[i]; // NEW: Assign priority to passenger struct
         shared_passengers[i].shortestPath.active = true;
         shared_passengers[i].movingEntity.currentPos = global_graph->positions[sources[i]];
         visual_targets[i] = global_graph->positions[sources[i]];
@@ -276,9 +280,9 @@ int main() {
     while (!WindowShouldClose()) {
         Vector2 mousePoint = GetMousePosition();
 
-        // NEW: Toggle between FCFS and SJF scheduling algorithms by pressing 'S'
+        // Toggle between FCFS and PRIORITY scheduling algorithms by pressing 'S'
         if (IsKeyPressed(KEY_S)) {
-            current_algorithm = (current_algorithm == SCHEDULING_FCFS) ? SCHEDULING_SJF : SCHEDULING_FCFS;
+            current_algorithm = (current_algorithm == SCHEDULING_FCFS) ? SCHEDULING_PRIORITY : SCHEDULING_FCFS;
         }
 
         bool allFinished = true;
@@ -334,8 +338,8 @@ int main() {
                         int requestedNode = (incomingMsg.nextNode == -1 || shared_passengers[i].movingEntity.currentPathIndex == 0) ? incomingMsg.currentNode : incomingMsg.nextNode;
                         int releaseNodeNum = (requestedNode == incomingMsg.currentNode) ? -1 : incomingMsg.currentNode;
 
-                        // NEW: Add the requesting vehicle to the centralized queue of the target node
-                        addToNodeQueue(requestedNode, i, shared_passengers[i].burstTime);
+                        // Add the requesting vehicle to the centralized queue with its priority
+                        addToNodeQueue(requestedNode, i, shared_passengers[i].priority);
 
                         // NEW: Free up the previous node and wake up the next waiting vehicle in its queue
                         if (releaseNodeNum != -1) {
@@ -420,8 +424,8 @@ int main() {
 
                 DrawCar(shared_passengers[i].movingEntity.currentPos, shared_passengers[i].carRotation, myColor, shared_passengers[i].movingEntity.isWaiting);
 
-                // NEW: Show Burst Time next to the PID on the screen for SJF verification
-                DrawText(TextFormat("PID: %d [Burst: %d]", shared_passengers[i].id, shared_passengers[i].burstTime),
+                // Show Priority next to the PID on the screen for verification
+                DrawText(TextFormat("PID: %d [Priority: %d]", shared_passengers[i].id, shared_passengers[i].priority),
                          shared_passengers[i].movingEntity.currentPos.x - 20,
                          shared_passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
             }

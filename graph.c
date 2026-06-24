@@ -403,13 +403,13 @@ void initNodeQueues(int numVertices) {
 }
 
 // Adds a vehicle to the waiting queue of a specific node
-void addToNodeQueue(int node, int agentIndex, int burstTime) {
+void addToNodeQueue(int node, int agentIndex, int priority) {
     if (node < 0 || node >= 1000) return;
     int c = nodeQueues[node].count;
     if (c >= MAX_PASSENGERS) return; // Prevent overflow
 
     nodeQueues[node].queue[c].agentIndex = agentIndex;
-    nodeQueues[node].queue[c].burstTime = burstTime;
+    nodeQueues[node].queue[c].priority = priority; // שונה ל-priority
     nodeQueues[node].queue[c].arrivalOrder = globalArrivalCounter++; // Important for FCFS tie-breaking
     nodeQueues[node].count++;
 }
@@ -427,11 +427,11 @@ int scheduleNextAgent(int node, int algorithmType) {
             if (nq->queue[i].arrivalOrder < nq->queue[bestIndex].arrivalOrder) {
                 bestIndex = i;
             }
-        } else if (algorithmType == SCHEDULING_SJF) {
-            // Shortest Job First Logic
-            if (nq->queue[i].burstTime < nq->queue[bestIndex].burstTime) {
+        } else if (algorithmType == SCHEDULING_PRIORITY) { // שונה ל-PRIORITY
+            // Priority Scheduling Logic (Smaller numbers = higher priority)
+            if (nq->queue[i].priority < nq->queue[bestIndex].priority) {
                 bestIndex = i;
-            } else if (nq->queue[i].burstTime == nq->queue[bestIndex].burstTime) {
+            } else if (nq->queue[i].priority == nq->queue[bestIndex].priority) {
                 // Break ties using FCFS
                 if (nq->queue[i].arrivalOrder < nq->queue[bestIndex].arrivalOrder) {
                     bestIndex = i;
@@ -451,7 +451,6 @@ int scheduleNextAgent(int node, int algorithmType) {
     nodeOwner[node] = selectedAgent; // Lock the node for the selected vehicle
     return selectedAgent;
 }
-
 // Marks a node as free when a vehicle leaves
 void releaseNode(int node) {
     if (node >= 0 && node < 1000) nodeOwner[node] = -1;

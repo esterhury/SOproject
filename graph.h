@@ -10,9 +10,9 @@
 #define EDGE_STEP_TIME 18   // Frame interval duration before executing a linear interpolation step
 #define MAX_PASSENGERS 20   // Maximum administrative array bound capacity for passenger tracking
 
-// NEW: Constants for Milestone 7 Scheduling Algorithms (FCFS vs SJF)
-#define SCHEDULING_FCFS 0
-#define SCHEDULING_SJF  1
+// Constants for Milestone 7 Scheduling Algorithms (FCFS vs PRIORITY)
+#define SCHEDULING_FCFS     0
+#define SCHEDULING_PRIORITY 1
 
 // Node structure for adjacency list representations of the graph network
 typedef struct Node {
@@ -54,13 +54,13 @@ typedef struct {
     Entity movingEntity;       // Mechanical visual translation state profile of the corresponding vehicle
     float carRotation;         // Current vehicle orientation angle (degrees) relative to its direction vector
     bool simulationFinished;   // Boolean flag indicating if this agent has reached its target terminal destination
-    int burstTime;             // NEW: Execution time/priority parameter needed for the SJF algorithm
+    int priority;             // NEW: Execution time/priority parameter needed for the SJF algorithm
 } Passenger;
 
-// NEW: Data structures for Centralized Node Queues (Bat 1 Task)
+// Data structures for Centralized Node Queues (Bat 2 Priority Scheduling)
 typedef struct {
     int agentIndex;
-    int burstTime;
+    int priority;
     int arrivalOrder;
 } WaitingAgent;
 
@@ -88,9 +88,9 @@ void updateEntity(Entity* entity, Graph* graph, Path* path);
 void calculatePassengerRoute(Graph* graph, Passenger* passenger, int src, int dst);
 void updateAllPassengers(Graph* graph, Passenger passengers[], int count, bool isRunning);
 
-// NEW:  Centralized API functions
+// Centralized API functions
 void initNodeQueues(int numVertices);
-void addToNodeQueue(int node, int agentIndex, int burstTime);
+void addToNodeQueue(int node, int agentIndex, int priority);
 int scheduleNextAgent(int node, int algorithmType);
 void releaseNode(int node);
 int getNodeOwner(int node);
