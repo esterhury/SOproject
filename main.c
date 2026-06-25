@@ -210,10 +210,24 @@ void createTravelerProcesses(Graph* graph, int numTravelers, int sources[], int 
     }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    if (argc > 1) {
+        if (strcmp(argv[1], "fcfs") == 0) {
+            current_algorithm = SCHEDULING_FCFS;
+        } else if (strcmp(argv[1], "sjf") == 0) {
+            current_algorithm = SCHEDULING_PRIORITY;
+        } else {
+            printf("Warning: Unknown algorithm '%s'. Defaulting to FCFS.\n", argv[1]);
+            current_algorithm = SCHEDULING_FCFS;
+        }
+    } else {
+        printf("No algorithm specified. Defaulting to FCFS.\n");
+        current_algorithm = SCHEDULING_FCFS;
+    }
+
     int* sourcesArray = NULL;
     int* destsArray = NULL;
-    int* burstTimesArray = NULL; // NEW: Pointer to hold burst times loaded from file
+    int* burstTimesArray = NULL;
     int numTravelers = 0;
 
     // Load initial simulation configuration
@@ -436,8 +450,18 @@ int main() {
         DrawRectangleRec(stopBtn, RED);
         DrawText("STOP", stopBtn.x + 35, stopBtn.y + 10, 20, WHITE);
 
-        // NEW: Draw UI text to show the current Scheduler Mode
-        DrawText(TextFormat("Scheduler Mode (Press 'S' to Switch): %s", (current_algorithm == SCHEDULING_FCFS) ? "FCFS (First-Come)" : "SJF (Shortest-Job)"), 20, 20, 18, BLACK);
+        char modeUpper[15];
+        if (current_algorithm == SCHEDULING_PRIORITY) {
+            strcpy(modeUpper, "SJF / PRIO");
+        } else {
+            strcpy(modeUpper, "FCFS");
+        }
+
+        DrawRectangle(20, 20, 180, 40, LIGHTGRAY);
+        DrawRectangleLines(20, 20, 180, 40, DARKGRAY);
+
+        DrawText("SCHEDULER:", 30, 32, 12, DARKGRAY);
+        DrawText(modeUpper, 110, 30, 16, (current_algorithm == SCHEDULING_PRIORITY) ? PURPLE : BLUE);
 
         EndDrawing();
     }
