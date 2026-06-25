@@ -13,7 +13,6 @@
 #include "raylib.h"
 #include "graph.h"
 
-// Define the structure for IPC messages used for communication between child processes and the parent
 typedef struct {
     int agentIndex;
     int currentNode;
@@ -22,45 +21,33 @@ typedef struct {
     bool isFinished;
 } IPCMessage;
 
-// Global variables for process management and shared simulation state
 pid_t global_pids[MAX_PASSENGERS] = {0};
 int agent_pipes[MAX_PASSENGERS][2];
 Passenger shared_passengers[MAX_PASSENGERS];
-int total_passengers = 3; // Matched to 3 travelers from the professor's sample
+int total_passengers = 3;
 
-// Member 1 - Milestone 6: Global graph pointer needed for the signal handler to free resources
 Graph* global_graph = NULL;
 Vector2 visual_targets[MAX_PASSENGERS];
-float animation_speed = 0.04f;
+float animation_speed = 0.05f;
 
 #define SCHEDULING_FCFS 0
 #define SCHEDULING_PRIORITY 1
 
-// NEW: Variable to track the active centralized scheduling algorithm (FCFS or SJF)
 int current_algorithm = SCHEDULING_FCFS;
 
-
-// Member 1 - Milestone 6: Signal handler for graceful simulation shutdown
-// This function catches interrupt signals (like Ctrl+C) to prevent zombie processes
 void handle_sigint(int sig) {
     printf("\n[Signal %d caught] Gracefully shutting down simulation...\n", sig);
-
-    // 1. Terminate all child processes politely using SIGTERM to allow cleanup
     for (int i = 0; i < total_passengers; i++) {
         if (global_pids[i] > 0) {
             kill(global_pids[i], SIGTERM);
-            waitpid(global_pids[i], NULL, 0); // Reaping processes to prevent zombies
+            waitpid(global_pids[i], NULL, 0);
         }
-        // 2. Close communication pipes to release file descriptors
         close(agent_pipes[i][0]);
         close(agent_pipes[i][1]);
     }
-
-    // 3. Clean up the shared graph resources and memory safely
     if (global_graph != NULL) {
         freeGraph(global_graph);
     }
-
     printf("Cleanup complete. Exiting.\n");
     exit(0);
 }
@@ -100,7 +87,6 @@ void DrawCar(Vector2 position, float rotation, Color color, bool isWaiting) {
 
     if (isWaiting) {
         int fontSize = 11;
-        // NEW: Updated text to reflect that waiting is now managed by the parent scheduler
         const char* waitText = "SCHEDULING...";
         int textWidth = MeasureText(waitText, fontSize);
         DrawText(waitText, position.x - (textWidth / 2), position.y - 35, fontSize, ORANGE);
@@ -119,67 +105,48 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
     if (!myPath.active || myPath.count <= 0) exit(1);
 
-    // NEW: The child no longer locks the graph node directly. It waits for the parent's permission via private semaphore
-    // sem_wait(&(graph->semaphores[myPath.nodes[0]])); // OLD
-
     IPCMessage msg = {
         .agentIndex = agentIndex,
         .currentNode = myPath.nodes[0],
         .nextNode = (myPath.count > 1) ? myPath.nodes[1] : -1,
-        .isWaiting = true, // NEW: Start in waiting state to ask parent for permission
+        .isWaiting = true,
         .isFinished = false
     };
 
     int unused_ret;
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
-    // NEW: Wait centrally until the parent grants access to the starting node
     sem_wait(&(graph->agent_semaphores[agentIndex]));
 
-    // NEW: Notify parent we entered successfully
     msg.isWaiting = false;
     msg.isFinished = (myPath.count == 1);
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
-    // Traverse the computed path
     for (int i = 0; i < myPath.count - 1; i++) {
         int curr = myPath.nodes[i];
         int next = myPath.nodes[i + 1];
 
-        // Simulate transit time along the edge
-        for (int step = 0; step < 150; step++) {
-            usleep(30000);
+        for (int step = 0; step < 100; step++) {
+            usleep(20000);
         }
 
-        // Notify parent that the agent is waiting outside the next node
         msg.currentNode = curr;
         msg.nextNode = next;
         msg.isWaiting = true;
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
-        // NEW: Enforce Mutual Exclusion centrally - block on private agent semaphore and let the parent schedule entry
-        // sem_wait(&(graph->semaphores[next])); // OLD
-        // sem_post(&(graph->semaphores[curr])); // OLD
-        sem_wait(&(graph->agent_semaphores[agentIndex])); // NEW
+        sem_wait(&(graph->agent_semaphores[agentIndex]));
 
-        // Update status and notify parent
         msg.currentNode = next;
         msg.nextNode = (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1;
         msg.isWaiting = false;
         if (i + 1 == myPath.count - 1) msg.isFinished = true;
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
-        // Critical Section: Hold the node for exactly 1 second
         sleep(1);
     }
 
-    // Release the final destination node
-    // sem_post(&(graph->semaphores[myPath.nodes[myPath.count - 1]])); // OLD
-    // NEW: Removed blind sem_post. The parent process handles releasing the final node centrally.
-
     (void)unused_ret;
-
-    // Keep child alive until main simulation shutdown
     while (1) {
         sleep(1);
     }
@@ -211,56 +178,63 @@ void createTravelerProcesses(Graph* graph, int numTravelers, int sources[], int 
 }
 
 int main(int argc, char* argv[]) {
-    if (argc > 1) {
-        if (strcmp(argv[1], "fcfs") == 0) {
+    int algo_idx = 1;
+    char* input_filename = "input.txt";
+
+    if (argc > 1 && strcmp(argv[1], "-schd") == 0) {
+        algo_idx = 2;
+    }
+
+    if (argc > algo_idx) {
+        if (strcmp(argv[algo_idx], "fcfs") == 0) {
             current_algorithm = SCHEDULING_FCFS;
-        } else if (strcmp(argv[1], "sjf") == 0) {
+            printf("Selected Algorithm: FCFS\n");
+        } else if (strcmp(argv[algo_idx], "sjf") == 0) {
             current_algorithm = SCHEDULING_PRIORITY;
+            printf("Selected Algorithm: SJF (Priority)\n");
         } else {
-            printf("Warning: Unknown algorithm '%s'. Defaulting to FCFS.\n", argv[1]);
+            printf("Warning: Unknown algorithm '%s'. Defaulting to FCFS.\n", argv[algo_idx]);
             current_algorithm = SCHEDULING_FCFS;
+        }
+        if (argc > algo_idx + 1) {
+            input_filename = argv[algo_idx + 1];
         }
     } else {
         printf("No algorithm specified. Defaulting to FCFS.\n");
         current_algorithm = SCHEDULING_FCFS;
     }
+    printf("Loading input file: %s\n", input_filename);
+    fflush(stdout);
 
     int* sourcesArray = NULL;
     int* destsArray = NULL;
     int* burstTimesArray = NULL;
     int numTravelers = 0;
 
-    // Load initial simulation configuration
-    // NEW: Updated function call to include burstTimesArray
-    global_graph = loadGraphFromFile("input.txt", &sourcesArray, &destsArray, &burstTimesArray, &numTravelers);
+    global_graph = loadGraphFromFile(input_filename, &sourcesArray, &destsArray, &burstTimesArray, &numTravelers);
     if (global_graph == NULL) {
         printf("Error: Graph context could not be loaded safely.\n");
         return 1;
     }
 
-    // Member 1 - Milestone 6: Register signal handler for Ctrl+C (SIGINT)
     signal(SIGINT, handle_sigint);
-
     computePosition(global_graph);
 
     if (numTravelers > 0 && numTravelers <= MAX_PASSENGERS) {
         total_passengers = numTravelers;
     }
 
-    // NEW: Array to hold burst times for the active passengers
     int burstTimes[MAX_PASSENGERS];
-
     for (int i = 0; i < MAX_PASSENGERS; i++) {
         shared_passengers[i].simulationFinished = false;
         shared_passengers[i].shortestPath.active = false;
         shared_passengers[i].movingEntity.isMoving = false;
         shared_passengers[i].movingEntity.isWaiting = false;
-
-        // --- FIXED: Reset the path index so cars don't get stuck at node 0! ---
         shared_passengers[i].movingEntity.currentPathIndex = 0;
-
         shared_passengers[i].carRotation = 0.0f;
-        shared_passengers[i].priority = 10; // NEW: Default priority
+        shared_passengers[i].priority = 10;
+        // משתנה עזר פנימי לספירת זמן השהייה בצומת (עבור האנימציה)
+        shared_passengers[i].id = 0;
     }
 
     int sources[MAX_PASSENGERS];
@@ -268,12 +242,11 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < total_passengers; i++) {
         sources[i] = sourcesArray[i];
         dests[i] = destsArray[i];
-        burstTimes[i] = burstTimesArray[i]; // NEW: Transfer loaded burst times
+        burstTimes[i] = burstTimesArray[i];
     }
 
     for (int i = 0; i < total_passengers; i++) {
-        shared_passengers[i].id = 1000 + i;
-        shared_passengers[i].priority = burstTimes[i]; // NEW: Assign priority to passenger struct
+        shared_passengers[i].priority = burstTimes[i];
         shared_passengers[i].shortestPath.active = true;
         shared_passengers[i].movingEntity.currentPos = global_graph->positions[sources[i]];
         visual_targets[i] = global_graph->positions[sources[i]];
@@ -287,14 +260,18 @@ int main(int argc, char* argv[]) {
     SetTargetFPS(60);
 
     bool process_logged_finished[MAX_PASSENGERS] = {false};
+    bool summary_printed = false;
 
-    // NEW: Initialize the centralized node queues in the parent process
+    // מערך שעוקב אחרי זמני ה-Burst שנותרו לכל מכונית בצומת הנוכחי (בפריימים)
+    int remaining_burst_frames[MAX_PASSENGERS] = {0};
+    int current_node_occupied[MAX_PASSENGERS];
+    for(int i=0; i<MAX_PASSENGERS; i++) current_node_occupied[i] = -1;
+
     initNodeQueues(global_graph->numVertices);
 
     while (!WindowShouldClose()) {
         Vector2 mousePoint = GetMousePosition();
 
-        // Toggle between FCFS and PRIORITY scheduling algorithms by pressing 'S'
         if (IsKeyPressed(KEY_S)) {
             current_algorithm = (current_algorithm == SCHEDULING_FCFS) ? SCHEDULING_PRIORITY : SCHEDULING_FCFS;
         }
@@ -308,25 +285,32 @@ int main(int argc, char* argv[]) {
         }
 
         if (CheckCollisionPointRec(mousePoint, playBtn) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            if (!isRunning) {
-                initNodeQueues(global_graph->numVertices); // NEW: Reset queues on restart
-                if (allFinished) {
-                    for (int i = 0; i < total_passengers; i++) {
-                        waitpid(global_pids[i], NULL, WNOHANG);
-                        shared_passengers[i].simulationFinished = false;
-                        shared_passengers[i].movingEntity.isWaiting = false;
-                        shared_passengers[i].movingEntity.currentPos = global_graph->positions[sources[i]];
-
-                        // --- FIXED: Reset the path index on restart! ---
-                        shared_passengers[i].movingEntity.currentPathIndex = 0;
-
-                        visual_targets[i] = global_graph->positions[sources[i]];
-                        process_logged_finished[i] = false;
+            if (allFinished) {
+                initNodeQueues(global_graph->numVertices);
+                for (int n = 0; n < global_graph->numVertices; n++) releaseNode(n);
+                for (int i = 0; i < total_passengers; i++) {
+                    if (global_pids[i] > 0) {
+                        kill(global_pids[i], SIGKILL);
+                        waitpid(global_pids[i], NULL, 0);
+                        global_pids[i] = 0;
                     }
-                    createTravelerProcesses(global_graph, total_passengers, sources, dests);
-                } else if (global_pids[0] == 0) {
-                    createTravelerProcesses(global_graph, total_passengers, sources, dests);
+                    shared_passengers[i].simulationFinished = false;
+                    shared_passengers[i].movingEntity.isWaiting = false;
+                    shared_passengers[i].movingEntity.currentPos = global_graph->positions[sources[i]];
+                    shared_passengers[i].movingEntity.currentPathIndex = 0;
+                    visual_targets[i] = global_graph->positions[sources[i]];
+                    process_logged_finished[i] = false;
+                    remaining_burst_frames[i] = 0;
+                    current_node_occupied[i] = -1;
                 }
+                summary_printed = false;
+                createTravelerProcesses(global_graph, total_passengers, sources, dests);
+                isRunning = true;
+            }
+            else if (!isRunning) {
+                initNodeQueues(global_graph->numVertices);
+                for (int n = 0; n < global_graph->numVertices; n++) releaseNode(n);
+                createTravelerProcesses(global_graph, total_passengers, sources, dests);
                 isRunning = true;
             }
         }
@@ -335,41 +319,59 @@ int main(int argc, char* argv[]) {
             isRunning = false;
         }
 
-        // --- PARENT IPC INPUT TRACKING LOOP ---
-        if (isRunning) {
+        if (isRunning && !allFinished) {
+            // לולאת עדכון זמן ה-Burst של מכוניות שנמצאות כרגע בתוך צומת
+            for (int i = 0; i < total_passengers; i++) {
+                if (remaining_burst_frames[i] > 0) {
+                    remaining_burst_frames[i]--;
+
+                    // אם המכונית סיימה את זמן השהייה שלה בצומת - נשחרר אותו עבור הבאים בתור!
+                    if (remaining_burst_frames[i] == 0 && current_node_occupied[i] != -1) {
+                        int compNode = current_node_occupied[i];
+                        releaseNode(compNode);
+                        current_node_occupied[i] = -1;
+
+                        int nextSelected = scheduleNextAgent(compNode, current_algorithm);
+                        if (nextSelected != -1) {
+                            sem_post(&(global_graph->agent_semaphores[nextSelected]));
+                        }
+                    }
+                }
+            }
+
             for (int i = 0; i < total_passengers; i++) {
                 IPCMessage incomingMsg;
                 ssize_t bytesRead = read(agent_pipes[i][0], &incomingMsg, sizeof(IPCMessage));
 
                 if (bytesRead == sizeof(IPCMessage)) {
-                    shared_passengers[i].id = global_pids[i];
-                    shared_passengers[i].movingEntity.isWaiting = incomingMsg.isWaiting;
-
                     Vector2 currentJunctionPos = global_graph->positions[incomingMsg.currentNode];
 
                     if (incomingMsg.isWaiting) {
-                        // NEW: Parent identifies which node the vehicle wants to enter and which node it left
-                        int requestedNode = (incomingMsg.nextNode == -1 || shared_passengers[i].movingEntity.currentPathIndex == 0) ? incomingMsg.currentNode : incomingMsg.nextNode;
-                        int releaseNodeNum = (requestedNode == incomingMsg.currentNode) ? -1 : incomingMsg.currentNode;
+                        int requestedNode = (shared_passengers[i].movingEntity.currentPathIndex == 0) ? incomingMsg.currentNode : incomingMsg.nextNode;
+                        int releaseNodeNum = (shared_passengers[i].movingEntity.currentPathIndex == 0) ? -1 : incomingMsg.currentNode;
 
-                        // Add the requesting vehicle to the centralized queue with its priority
-                        addToNodeQueue(requestedNode, i, shared_passengers[i].priority);
-
-                        // NEW: Free up the previous node and wake up the next waiting vehicle in its queue
-                        if (releaseNodeNum != -1) {
-                            releaseNode(releaseNodeNum);
-                            int nextSelected = scheduleNextAgent(releaseNodeNum, current_algorithm);
-                            if (nextSelected != -1) {
-                                sem_post(&(global_graph->agent_semaphores[nextSelected]));
+                        if (getNodeOwner(requestedNode) != i) {
+                            if (!shared_passengers[i].movingEntity.isWaiting) {
+                                shared_passengers[i].movingEntity.isWaiting = true;
+                                addToNodeQueue(requestedNode, i, shared_passengers[i].priority);
                             }
-                        }
 
-                        // NEW: Check if the newly requested node is currently free. If yes, schedule and grant access immediately
-                        if (getNodeOwner(requestedNode) == -1) {
-                            int nextSelected = scheduleNextAgent(requestedNode, current_algorithm);
-                            if (nextSelected != -1) {
-                                sem_post(&(global_graph->agent_semaphores[nextSelected]));
+                            if (releaseNodeNum != -1 && remaining_burst_frames[i] == 0) {
+                                releaseNode(releaseNodeNum);
+                                int nextSelected = scheduleNextAgent(releaseNodeNum, current_algorithm);
+                                if (nextSelected != -1) {
+                                    sem_post(&(global_graph->agent_semaphores[nextSelected]));
+                                }
                             }
+
+                            if (getNodeOwner(requestedNode) == -1) {
+                                int nextSelected = scheduleNextAgent(requestedNode, current_algorithm);
+                                if (nextSelected != -1) {
+                                    sem_post(&(global_graph->agent_semaphores[nextSelected]));
+                                }
+                            }
+                        } else {
+                            shared_passengers[i].movingEntity.isWaiting = false;
                         }
 
                         Vector2 targetJunctionPos = global_graph->positions[requestedNode];
@@ -381,49 +383,63 @@ int main(int argc, char* argv[]) {
                             visual_targets[i].y = targetJunctionPos.y - (dy / len) * 35.0f;
                         }
                     } else {
+                        // המכונית קיבלה אישור ונכנסה לצומת! נפעיל לה את ה-Burst Time הגרפי
+                        shared_passengers[i].movingEntity.isWaiting = false;
                         visual_targets[i] = currentJunctionPos;
-
-                        // --- FIXED: Progress the path index so the car knows it advanced! ---
                         shared_passengers[i].movingEntity.currentPathIndex++;
 
-                        if (incomingMsg.nextNode != -1) {
-                            printf("[PID=%d] arrived at node %d | next node: %d\n", global_pids[i], incomingMsg.currentNode, incomingMsg.nextNode);
-                        } else {
-                            printf("[PID=%d] arrived at node %d | DESTINATION\n", global_pids[i], incomingMsg.currentNode);
-                            shared_passengers[i].simulationFinished = true;
+                        // המרה של ערך ה-Priority/Burst לשניות על המסך (למשל פריוריטי 50 יהיה 150 פריימים = 2.5 שניות)
+                        remaining_burst_frames[i] = incomingMsg.isWaiting ? 10 : (shared_passengers[i].priority * 3);
+                        current_node_occupied[i] = incomingMsg.currentNode;
 
-                            // NEW: Centralized release of the final destination node and waking up queued vehicles
-                            releaseNode(incomingMsg.currentNode);
-                            int nextSelected = scheduleNextAgent(incomingMsg.currentNode, current_algorithm);
-                            if (nextSelected != -1) {
-                                sem_post(&(global_graph->agent_semaphores[nextSelected]));
-                            }
+                        if (incomingMsg.nextNode != -1) {
+                            printf("[PID=%d] arrived at node %d | next node: %d (Burst active)\n", global_pids[i], incomingMsg.currentNode, incomingMsg.nextNode);
+                        } else {
+                            printf("[PID=%d] arrived at node %d | DESTINATION REACHED\n", global_pids[i], incomingMsg.currentNode);
+                            shared_passengers[i].simulationFinished = true;
                         }
                         fflush(stdout);
                     }
                 }
+            }
+        }
 
+        // עדכון אנימציה חלק
+        for (int i = 0; i < total_passengers; i++) {
+            float dx = visual_targets[i].x - shared_passengers[i].movingEntity.currentPos.x;
+            float dy = visual_targets[i].y - shared_passengers[i].movingEntity.currentPos.y;
+            if (sqrtf(dx*dx + dy*dy) > 1.0f) {
+                shared_passengers[i].movingEntity.currentPos.x += dx * 0.05f;
+                shared_passengers[i].movingEntity.currentPos.y += dy * 0.05f;
+                shared_passengers[i].carRotation = atan2f(dy, dx) * (180.0f / PI);
+            }
+        }
+
+        if (allFinished && isRunning) {
+            bool physicallyArrived = true;
+            for(int i=0; i<total_passengers; i++) {
                 float dx = visual_targets[i].x - shared_passengers[i].movingEntity.currentPos.x;
                 float dy = visual_targets[i].y - shared_passengers[i].movingEntity.currentPos.y;
-                if (sqrtf(dx*dx + dy*dy) > 1.0f) {
-                    shared_passengers[i].movingEntity.currentPos.x += dx * animation_speed;
-                    shared_passengers[i].movingEntity.currentPos.y += dy * animation_speed;
-                    shared_passengers[i].carRotation = atan2f(dy, dx) * (180.0f / PI);
-                }
+                if(sqrtf(dx*dx + dy*dy) > 5.0f) physicallyArrived = false;
             }
 
-            // --- STRICT REAPING SEQUENCE ORDERING ---
-            if (allFinished) {
+            if (physicallyArrived) {
                 for (int i = 0; i < total_passengers; i++) {
                     if (!process_logged_finished[i]) {
-                        printf("[PID=%d] finished\n", global_pids[i]);
-                        fflush(stdout);
-                        // Member 1 - Milestone 6: Replace SIGKILL with SIGTERM for graceful exit
+                        printf("[PID=%d] finished tracking\n", global_pids[i]);
                         kill(global_pids[i], SIGTERM);
                         waitpid(global_pids[i], NULL, 0);
                         process_logged_finished[i] = true;
                     }
                 }
+                if (!summary_printed) {
+                    printf("\n=============================================\n");
+                    printf(" SUCCESS: All travelers reached their destination!\n");
+                    printf("=============================================\n\n");
+                    fflush(stdout);
+                    summary_printed = true;
+                }
+                isRunning = false;
             }
         }
 
@@ -434,32 +450,33 @@ int main(int argc, char* argv[]) {
         for (int i = 0; i < total_passengers; i++) {
             if (!process_logged_finished[i]) {
                 Color carColors[] = { BLUE, GREEN, PURPLE, ORANGE };
-                Color myColor = carColors[i % 4]; //
+                Color myColor = carColors[i % 4];
 
                 DrawCar(shared_passengers[i].movingEntity.currentPos, shared_passengers[i].carRotation, myColor, shared_passengers[i].movingEntity.isWaiting);
 
-                // Show Priority next to the PID on the screen for verification
-                DrawText(TextFormat("PID: %d [Priority: %d]", shared_passengers[i].id, shared_passengers[i].priority),
+                DrawText(TextFormat("PID: %d [Burst: %d]", global_pids[i], shared_passengers[i].priority),
                          shared_passengers[i].movingEntity.currentPos.x - 20,
                          shared_passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
             }
         }
 
-        DrawRectangleRec(playBtn, isRunning ? LIME : GREEN);
-        DrawText(allFinished ? "RESTART" : "PLAY", playBtn.x + 15, playBtn.y + 10, 20, BLACK);
+        if (allFinished) {
+            DrawRectangleRec(playBtn, GREEN);
+            DrawText("RESTART", playBtn.x + 15, playBtn.y + 10, 20, BLACK);
+        } else {
+            DrawRectangleRec(playBtn, isRunning ? LIME : GREEN);
+            DrawText("PLAY", playBtn.x + 35, playBtn.y + 10, 20, BLACK);
+        }
+
         DrawRectangleRec(stopBtn, RED);
         DrawText("STOP", stopBtn.x + 35, stopBtn.y + 10, 20, WHITE);
 
         char modeUpper[15];
-        if (current_algorithm == SCHEDULING_PRIORITY) {
-            strcpy(modeUpper, "SJF / PRIO");
-        } else {
-            strcpy(modeUpper, "FCFS");
-        }
+        if (current_algorithm == SCHEDULING_PRIORITY) strcpy(modeUpper, "SJF / PRIO");
+        else strcpy(modeUpper, "FCFS");
 
         DrawRectangle(20, 20, 180, 40, LIGHTGRAY);
         DrawRectangleLines(20, 20, 180, 40, DARKGRAY);
-
         DrawText("SCHEDULER:", 30, 32, 12, DARKGRAY);
         DrawText(modeUpper, 110, 30, 16, (current_algorithm == SCHEDULING_PRIORITY) ? PURPLE : BLUE);
 
@@ -467,12 +484,11 @@ int main(int argc, char* argv[]) {
     }
 
     CloseWindow();
-    // Final cleanup call
     handle_sigint(0);
 
     if (sourcesArray) free(sourcesArray);
     if (destsArray) free(destsArray);
-    if (burstTimesArray) free(burstTimesArray); // NEW: Free the dynamically allocated burst times array
+    if (burstTimesArray) free(burstTimesArray);
     freeGraph(global_graph);
 
     return 0;
