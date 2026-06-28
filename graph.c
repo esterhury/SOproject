@@ -403,15 +403,25 @@ void initNodeQueues(int numVertices) {
 }
 
 // Adds a vehicle to the waiting queue of a specific node
+// Adds a vehicle to the waiting queue of a specific node
 void addToNodeQueue(int node, int agentIndex, int priority) {
     if (node < 0 || node >= 1000) return;
-    int c = nodeQueues[node].count;
+
+    NodeQueue* nq = &nodeQueues[node];
+
+    for (int i = 0; i < nq->count; i++) {
+        if (nq->queue[i].agentIndex == agentIndex) {
+            return;
+        }
+    }
+
+    int c = nq->count;
     if (c >= MAX_PASSENGERS) return; // Prevent overflow
 
-    nodeQueues[node].queue[c].agentIndex = agentIndex;
-    nodeQueues[node].queue[c].priority = priority; // שונה ל-priority
-    nodeQueues[node].queue[c].arrivalOrder = globalArrivalCounter++; // Important for FCFS tie-breaking
-    nodeQueues[node].count++;
+    nq->queue[c].agentIndex = agentIndex;
+    nq->queue[c].priority = priority;
+    nq->queue[c].arrivalOrder = globalArrivalCounter++; // Important for FCFS tie-breaking
+    nq->count++;
 }
 
 // The core logic function: decides who enters the intersection next
