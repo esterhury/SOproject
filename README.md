@@ -32,6 +32,8 @@ The application accepts the scheduling algorithm flag and parameter directly via
 2. Running with Shortest Job First (SJF) Scheduler:  
   **./sim -schd sjf**
 
+check
+
 *Note: You can also dynamically toggle between algorithms during runtime by pressing the S key on your keyboard.*
 
 ---
