@@ -431,6 +431,14 @@ int scheduleNextAgent(int node, int algorithmType) {
     int bestIndex = 0;
     NodeQueue* nq = &nodeQueues[node];
 
+    // --- הדפסת רשימת הממתינים בצומת ---
+    printf("\n[Scheduler Decision] At Node %d, current queue: ", node);
+    for (int k = 0; k < nq->count; k++) {
+        printf("Agent_%d (Priority: %d, Order: %d) ",
+               nq->queue[k].agentIndex, nq->queue[k].priority, nq->queue[k].arrivalOrder);
+    }
+    printf("\n");
+
     for (int i = 1; i < nq->count; i++) {
         if (algorithmType == SCHEDULING_FCFS) {
             // First-Come, First-Served Logic
@@ -451,6 +459,17 @@ int scheduleNextAgent(int node, int algorithmType) {
     }
 
     int selectedAgent = nq->queue[bestIndex].agentIndex;
+
+    // --- הדפסת מי נבחר ולמה  ---
+    printf(">> Chosen Agent: Agent_%d\n", selectedAgent);
+    if (algorithmType == SCHEDULING_FCFS) {
+        printf(">> Reason: Selected based on FCFS (arrived first with arrival order %d).\n",
+               nq->queue[bestIndex].arrivalOrder);
+    } else if (algorithmType == SCHEDULING_PRIORITY) {
+        printf(">> Reason: Selected based on SJF/Priority (had the smallest burst time/priority of %d).\n",
+               nq->queue[bestIndex].priority);
+    }
+    printf("==========================================\n");
 
     // Remove the selected vehicle from the queue and shift others down
     for (int i = bestIndex; i < nq->count - 1; i++) {
