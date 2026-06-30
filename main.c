@@ -19,6 +19,7 @@ typedef struct {
     int nextNode;
     bool isWaiting;
     bool isFinished;
+    bool noPathFound; //according to the request at c task
 } IPCMessage;
 
 pid_t global_pids[MAX_PASSENGERS] = {0};
@@ -103,14 +104,28 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
     Path myPath = reconstructPath(parentArr, src, dst);
     free(parentArr);
 
-    if (!myPath.active || myPath.count <= 0) exit(1);
+    if (!myPath.active || myPath.count <= 0) {
+        IPCMessage errorMsg = {
+            .agentIndex = agentIndex,
+            .currentNode = src,
+            .nextNode = -1,
+            .isWaiting = false,
+            .isFinished = true,
+            .noPathFound = true // מסמנים לאב: אין מסלול!
+        };
+        // שליחת הודעת השגיאה לאב דרך ה-Pipe
+        int unused_err = write(agent_pipes[agentIndex][1], &errorMsg, sizeof(IPCMessage));
+        (void)unused_err;
+        exit(1);
+    }
 
     IPCMessage msg = {
         .agentIndex = agentIndex,
         .currentNode = myPath.nodes[0],
         .nextNode = (myPath.count > 1) ? myPath.nodes[1] : -1,
         .isWaiting = true,
-        .isFinished = false
+        .isFinished = false,
+        .noPathFound = false // <-- הוספה: מאתחלים ב-false בהודעות רגילות!
     };
 
     int unused_ret;
@@ -120,6 +135,7 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
 
     msg.isWaiting = false;
     msg.isFinished = (myPath.count == 1);
+    msg.noPathFound = false; // <-- הוספה לביטחון
     unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
     for (int i = 0; i < myPath.count - 1; i++) {
@@ -133,6 +149,7 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
         msg.currentNode = curr;
         msg.nextNode = next;
         msg.isWaiting = true;
+        msg.noPathFound = false; // <-- הוספה לביטחון
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
         sem_wait(&(graph->agent_semaphores[agentIndex]));
@@ -140,6 +157,7 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
         msg.currentNode = next;
         msg.nextNode = (i + 2 < myPath.count) ? myPath.nodes[i + 2] : -1;
         msg.isWaiting = false;
+        msg.noPathFound = false; // <-- הוספה לביטחון
         if (i + 1 == myPath.count - 1) msg.isFinished = true;
         unused_ret = write(agent_pipes[agentIndex][1], &msg, sizeof(IPCMessage));
 
@@ -344,6 +362,17 @@ int main(int argc, char* argv[]) {
                 ssize_t bytesRead = read(agent_pipes[i][0], &incomingMsg, sizeof(IPCMessage));
 
                 if (bytesRead == sizeof(IPCMessage)) {
+
+                    // ========================================================
+                    // הוספה: טיפול מיוחד במקרה שהבן מדווח שאין מסלול (Milestone 5)
+                    // ========================================================
+                    if (incomingMsg.noPathFound) {
+                        printf("\n[PARENT ALERT] Agent %d (PID=%d) discovered that the graph is DISCONNECTED! No path to destination.\n\n",
+                               incomingMsg.agentIndex, global_pids[i]);
+                        shared_passengers[i].simulationFinished = true; // מסמנים שהסוכן סיים כדי שהסימולציה לא תתקע
+                        fflush(stdout);
+                        continue; // מדלגים על שאר לוגיקת התנועה הרגילה וממשיכים לסוכן הבא
+                    }
                     Vector2 currentJunctionPos = global_graph->positions[incomingMsg.currentNode];
 
                     if (incomingMsg.isWaiting) {
