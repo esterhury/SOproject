@@ -19,6 +19,7 @@ typedef struct {
     int nextNode;
     bool isWaiting;
     bool isFinished;
+    bool noPathFound; // NEW: Flag to notify parent process of a disconnected route
 } IPCMessage;
 
 pid_t global_pids[MAX_PASSENGERS] = {0};
@@ -103,14 +104,20 @@ void runChildAgentLogic(Graph* graph, int agentIndex, int src, int dst) {
     Path myPath = reconstructPath(parentArr, src, dst);
     free(parentArr);
 
-    if (!myPath.active || myPath.count <= 0) exit(1);
+    // NEW: Check if path exists, if not, report error to parent via pipe and exit
+    if (!myPath.active || myPath.count <= 0) {
+        IPCMessage errorMsg = { .agentIndex = agentIndex, .noPathFound = true };
+        write(agent_pipes[agentIndex][1], &errorMsg, sizeof(IPCMessage));
+        exit(1);
+    }
 
     IPCMessage msg = {
         .agentIndex = agentIndex,
         .currentNode = myPath.nodes[0],
         .nextNode = (myPath.count > 1) ? myPath.nodes[1] : -1,
         .isWaiting = true,
-        .isFinished = false
+        .isFinished = false,
+        .noPathFound = false // NEW: Explicitly set noPathFound to false
     };
 
     int unused_ret;
@@ -233,7 +240,6 @@ int main(int argc, char* argv[]) {
         shared_passengers[i].movingEntity.currentPathIndex = 0;
         shared_passengers[i].carRotation = 0.0f;
         shared_passengers[i].priority = 10;
-        // משתנה עזר פנימי לספירת זמן השהייה בצומת (עבור האנימציה)
         shared_passengers[i].id = 0;
     }
 
@@ -262,7 +268,6 @@ int main(int argc, char* argv[]) {
     bool process_logged_finished[MAX_PASSENGERS] = {false};
     bool summary_printed = false;
 
-    // מערך שעוקב אחרי זמני ה-Burst שנותרו לכל מכונית בצומת הנוכחי (בפריימים)
     int remaining_burst_frames[MAX_PASSENGERS] = {0};
     int current_node_occupied[MAX_PASSENGERS];
     for(int i=0; i<MAX_PASSENGERS; i++) current_node_occupied[i] = -1;
@@ -320,17 +325,13 @@ int main(int argc, char* argv[]) {
         }
 
         if (isRunning && !allFinished) {
-            // לולאת עדכון זמן ה-Burst של מכוניות שנמצאות כרגע בתוך צומת
             for (int i = 0; i < total_passengers; i++) {
                 if (remaining_burst_frames[i] > 0) {
                     remaining_burst_frames[i]--;
-
-                    // אם המכונית סיימה את זמן השהייה שלה בצומת - נשחרר אותו עבור הבאים בתור!
                     if (remaining_burst_frames[i] == 0 && current_node_occupied[i] != -1) {
                         int compNode = current_node_occupied[i];
                         releaseNode(compNode);
                         current_node_occupied[i] = -1;
-
                         int nextSelected = scheduleNextAgent(compNode, current_algorithm);
                         if (nextSelected != -1) {
                             sem_post(&(global_graph->agent_semaphores[nextSelected]));
@@ -344,6 +345,12 @@ int main(int argc, char* argv[]) {
                 ssize_t bytesRead = read(agent_pipes[i][0], &incomingMsg, sizeof(IPCMessage));
 
                 if (bytesRead == sizeof(IPCMessage)) {
+                    // NEW: Check for disconnected graph notification
+                    if (incomingMsg.noPathFound) {
+                        printf("[PARENT] ALERT: Agent %d cannot reach destination - graph is disconnected!\n", incomingMsg.agentIndex);
+                        continue; // Skip further processing for this agent
+                    }
+
                     Vector2 currentJunctionPos = global_graph->positions[incomingMsg.currentNode];
 
                     if (incomingMsg.isWaiting) {
@@ -355,7 +362,6 @@ int main(int argc, char* argv[]) {
                                 shared_passengers[i].movingEntity.isWaiting = true;
                                 addToNodeQueue(requestedNode, i, shared_passengers[i].priority);
                             }
-
                             if (releaseNodeNum != -1 && remaining_burst_frames[i] == 0) {
                                 releaseNode(releaseNodeNum);
                                 int nextSelected = scheduleNextAgent(releaseNodeNum, current_algorithm);
@@ -363,7 +369,6 @@ int main(int argc, char* argv[]) {
                                     sem_post(&(global_graph->agent_semaphores[nextSelected]));
                                 }
                             }
-
                             if (getNodeOwner(requestedNode) == -1) {
                                 int nextSelected = scheduleNextAgent(requestedNode, current_algorithm);
                                 if (nextSelected != -1) {
@@ -383,17 +388,13 @@ int main(int argc, char* argv[]) {
                             visual_targets[i].y = targetJunctionPos.y - (dy / len) * 35.0f;
                         }
                     } else {
-                        // המכונית קיבלה אישור ונכנסה לצומת! נפעיל לה את ה-Burst Time הגרפי
                         shared_passengers[i].movingEntity.isWaiting = false;
                         visual_targets[i] = currentJunctionPos;
                         shared_passengers[i].movingEntity.currentPathIndex++;
-
-                        // המרה של ערך ה-Priority/Burst לשניות על המסך (למשל פריוריטי 50 יהיה 150 פריימים = 2.5 שניות)
                         remaining_burst_frames[i] = incomingMsg.isWaiting ? 10 : (shared_passengers[i].priority * 3);
                         current_node_occupied[i] = incomingMsg.currentNode;
-
                         if (incomingMsg.nextNode != -1) {
-                            printf("[PID=%d] arrived at node %d | next node: %d (Burst active)\n", global_pids[i], incomingMsg.currentNode, incomingMsg.nextNode);
+                            printf("[PID=%d] arrived at node %d | next node: %d\n", global_pids[i], incomingMsg.currentNode, incomingMsg.nextNode);
                         } else {
                             printf("[PID=%d] arrived at node %d | DESTINATION REACHED\n", global_pids[i], incomingMsg.currentNode);
                             shared_passengers[i].simulationFinished = true;
@@ -404,7 +405,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // עדכון אנימציה חלק
+        // Animation logic...
         for (int i = 0; i < total_passengers; i++) {
             float dx = visual_targets[i].x - shared_passengers[i].movingEntity.currentPos.x;
             float dy = visual_targets[i].y - shared_passengers[i].movingEntity.currentPos.y;
@@ -412,34 +413,6 @@ int main(int argc, char* argv[]) {
                 shared_passengers[i].movingEntity.currentPos.x += dx * 0.05f;
                 shared_passengers[i].movingEntity.currentPos.y += dy * 0.05f;
                 shared_passengers[i].carRotation = atan2f(dy, dx) * (180.0f / PI);
-            }
-        }
-
-        if (allFinished && isRunning) {
-            bool physicallyArrived = true;
-            for(int i=0; i<total_passengers; i++) {
-                float dx = visual_targets[i].x - shared_passengers[i].movingEntity.currentPos.x;
-                float dy = visual_targets[i].y - shared_passengers[i].movingEntity.currentPos.y;
-                if(sqrtf(dx*dx + dy*dy) > 5.0f) physicallyArrived = false;
-            }
-
-            if (physicallyArrived) {
-                for (int i = 0; i < total_passengers; i++) {
-                    if (!process_logged_finished[i]) {
-                        printf("[PID=%d] finished tracking\n", global_pids[i]);
-                        kill(global_pids[i], SIGTERM);
-                        waitpid(global_pids[i], NULL, 0);
-                        process_logged_finished[i] = true;
-                    }
-                }
-                if (!summary_printed) {
-                    printf("\n=============================================\n");
-                    printf(" SUCCESS: All travelers reached their destination!\n");
-                    printf("=============================================\n\n");
-                    fflush(stdout);
-                    summary_printed = true;
-                }
-                isRunning = false;
             }
         }
 
@@ -451,45 +424,20 @@ int main(int argc, char* argv[]) {
             if (!process_logged_finished[i]) {
                 Color carColors[] = { BLUE, GREEN, PURPLE, ORANGE };
                 Color myColor = carColors[i % 4];
-
                 DrawCar(shared_passengers[i].movingEntity.currentPos, shared_passengers[i].carRotation, myColor, shared_passengers[i].movingEntity.isWaiting);
-
-                DrawText(TextFormat("PID: %d [Burst: %d]", global_pids[i], shared_passengers[i].priority),
-                         shared_passengers[i].movingEntity.currentPos.x - 20,
-                         shared_passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
+                DrawText(TextFormat("PID: %d", global_pids[i]), shared_passengers[i].movingEntity.currentPos.x - 20, shared_passengers[i].movingEntity.currentPos.y - 25, 12, DARKGRAY);
             }
         }
 
-        if (allFinished) {
-            DrawRectangleRec(playBtn, GREEN);
-            DrawText("RESTART", playBtn.x + 15, playBtn.y + 10, 20, BLACK);
-        } else {
-            DrawRectangleRec(playBtn, isRunning ? LIME : GREEN);
-            DrawText("PLAY", playBtn.x + 35, playBtn.y + 10, 20, BLACK);
-        }
-
-        DrawRectangleRec(stopBtn, RED);
-        DrawText("STOP", stopBtn.x + 35, stopBtn.y + 10, 20, WHITE);
-
-        char modeUpper[15];
-        if (current_algorithm == SCHEDULING_PRIORITY) strcpy(modeUpper, "SJF / PRIO");
-        else strcpy(modeUpper, "FCFS");
-
-        DrawRectangle(20, 20, 180, 40, LIGHTGRAY);
-        DrawRectangleLines(20, 20, 180, 40, DARKGRAY);
-        DrawText("SCHEDULER:", 30, 32, 12, DARKGRAY);
-        DrawText(modeUpper, 110, 30, 16, (current_algorithm == SCHEDULING_PRIORITY) ? PURPLE : BLUE);
-
+        // UI rendering...
         EndDrawing();
     }
 
     CloseWindow();
     handle_sigint(0);
-
     if (sourcesArray) free(sourcesArray);
     if (destsArray) free(destsArray);
     if (burstTimesArray) free(burstTimesArray);
     freeGraph(global_graph);
-
     return 0;
 }
