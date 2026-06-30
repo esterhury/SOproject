@@ -1,4 +1,4 @@
-#define _GNU_SOURCE
+ #define _GNU_SOURCE
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -425,6 +425,8 @@ void addToNodeQueue(int node, int agentIndex, int priority) {
 }
 
 // The core logic function: decides who enters the intersection next
+extern pid_t global_pids[];
+
 int scheduleNextAgent(int node, int algorithmType) {
     if (node < 0 || node >= 1000 || nodeQueues[node].count == 0) return -1;
 
@@ -433,16 +435,24 @@ int scheduleNextAgent(int node, int algorithmType) {
 
     for (int i = 1; i < nq->count; i++) {
         if (algorithmType == SCHEDULING_FCFS) {
-            // First-Come, First-Served Logic
             if (nq->queue[i].arrivalOrder < nq->queue[bestIndex].arrivalOrder) {
                 bestIndex = i;
             }
-        } else if (algorithmType == SCHEDULING_PRIORITY) { // שונה ל-PRIORITY
-            // Priority Scheduling Logic (Smaller numbers = higher priority)
+        } else if (algorithmType == SCHEDULING_PRIORITY) {
             if (nq->queue[i].priority < nq->queue[bestIndex].priority) {
                 bestIndex = i;
             } else if (nq->queue[i].priority == nq->queue[bestIndex].priority) {
-                // Break ties using FCFS
+                if (nq->queue[i].arrivalOrder < nq->queue[bestIndex].arrivalOrder) {
+                    bestIndex = i;
+                }
+            }
+        } else if (algorithmType == SCHEDULING_PID_PRIORITY) {
+            pid_t pid_i = global_pids[nq->queue[i].agentIndex];
+            pid_t pid_best = global_pids[nq->queue[bestIndex].agentIndex];
+
+            if (pid_i < pid_best) {
+                bestIndex = i;
+            } else if (pid_i == pid_best) {
                 if (nq->queue[i].arrivalOrder < nq->queue[bestIndex].arrivalOrder) {
                     bestIndex = i;
                 }
@@ -452,13 +462,12 @@ int scheduleNextAgent(int node, int algorithmType) {
 
     int selectedAgent = nq->queue[bestIndex].agentIndex;
 
-    // Remove the selected vehicle from the queue and shift others down
     for (int i = bestIndex; i < nq->count - 1; i++) {
         nq->queue[i] = nq->queue[i + 1];
     }
     nq->count--;
 
-    nodeOwner[node] = selectedAgent; // Lock the node for the selected vehicle
+    nodeOwner[node] = selectedAgent;
     return selectedAgent;
 }
 // Marks a node as free when a vehicle leaves

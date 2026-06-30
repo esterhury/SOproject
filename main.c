@@ -192,6 +192,9 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[algo_idx], "sjf") == 0) {
             current_algorithm = SCHEDULING_PRIORITY;
             printf("Selected Algorithm: SJF (Priority)\n");
+        } else if (strcmp(argv[algo_idx], "priority") == 0) {
+            current_algorithm = SCHEDULING_PID_PRIORITY;
+            printf("Selected Algorithm: PID Priority\n");
         } else {
             printf("Warning: Unknown algorithm '%s'. Defaulting to FCFS.\n", argv[algo_idx]);
             current_algorithm = SCHEDULING_FCFS;
@@ -273,7 +276,13 @@ int main(int argc, char* argv[]) {
         Vector2 mousePoint = GetMousePosition();
 
         if (IsKeyPressed(KEY_S)) {
-            current_algorithm = (current_algorithm == SCHEDULING_FCFS) ? SCHEDULING_PRIORITY : SCHEDULING_FCFS;
+            if (current_algorithm == SCHEDULING_FCFS) {
+                current_algorithm = SCHEDULING_PRIORITY;
+            } else if (current_algorithm == SCHEDULING_PRIORITY) {
+                current_algorithm = SCHEDULING_PID_PRIORITY;
+            } else {
+                current_algorithm = SCHEDULING_FCFS;
+            }
         }
 
         bool allFinished = true;
@@ -472,14 +481,23 @@ int main(int argc, char* argv[]) {
         DrawText("STOP", stopBtn.x + 35, stopBtn.y + 10, 20, WHITE);
 
         char modeUpper[15];
-        if (current_algorithm == SCHEDULING_PRIORITY) strcpy(modeUpper, "SJF / PRIO");
-        else strcpy(modeUpper, "FCFS");
+        Color algoColor = BLUE;
+
+        if (current_algorithm == SCHEDULING_PRIORITY) {
+            strcpy(modeUpper, "SJF");
+            algoColor = PURPLE;
+        } else if (current_algorithm == SCHEDULING_PID_PRIORITY) {
+            strcpy(modeUpper, "PID PRIO");
+            algoColor = RED;
+        } else {
+            strcpy(modeUpper, "FCFS");
+            algoColor = BLUE;
+        }
 
         DrawRectangle(20, 20, 180, 40, LIGHTGRAY);
         DrawRectangleLines(20, 20, 180, 40, DARKGRAY);
         DrawText("SCHEDULER:", 30, 32, 12, DARKGRAY);
-        DrawText(modeUpper, 110, 30, 16, (current_algorithm == SCHEDULING_PRIORITY) ? PURPLE : BLUE);
-
+        DrawText(modeUpper, 110, 30, 16, algoColor);
         EndDrawing();
     }
 

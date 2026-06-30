@@ -11,8 +11,9 @@
 #define MAX_PASSENGERS 20   // Maximum administrative array bound capacity for passenger tracking
 
 // Constants for Milestone 7 Scheduling Algorithms (FCFS vs PRIORITY)
-#define SCHEDULING_FCFS     0
-#define SCHEDULING_PRIORITY 1
+#define SCHEDULING_FCFS         0
+#define SCHEDULING_PRIORITY     1
+#define SCHEDULING_PID_PRIORITY 2
 
 // Node structure for adjacency list representations of the graph network
 typedef struct Node {
